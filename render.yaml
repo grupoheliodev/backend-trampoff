@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: backend-trampoff
+    env: node
+    region: oregon
+    plan: free
+    branch: main
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    # As variáveis sensíveis devem ser definidas no Dashboard do Render (ou via Secrets/Environment).
+    # Deixo as chaves listadas como referência — preencha os valores no painel do Render antes de deploy.
+    envVars:
+      - key: DB_HOST
+        value: ""
+      - key: DB_PORT
+        value: ""
+      - key: DB_USER
+        value: ""
+      - key: DB_PASSWORD
+        value: ""
+      - key: DB_DATABASE
+        value: ""
+      - key: NODE_ENV
+        value: production
