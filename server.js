@@ -54,6 +54,12 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// Middleware para logar todas as requisições
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
+  next();
+});
+
 // --- 3. Configuração do Banco de Dados e Segurança ---
 // Objeto que armazena as credenciais do banco de dados, lidas do arquivo .env.
 
