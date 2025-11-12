@@ -17,11 +17,16 @@ const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 
 // Verifica se as variáveis de ambiente essenciais estão definidas
+// Permitir ignorar a verificação em desenvolvimento definindo SKIP_DB_TEST=true
 const requiredEnvVars = ['DB_HOST', 'DB_USER', 'DB_DATABASE'];
-for (const envVar of requiredEnvVars) {
-    if (!process.env[envVar]) {
-        console.error(`Erro: Variável de ambiente ${envVar} não está definida!`);
-        process.exit(1);
+if (process.env.SKIP_DB_TEST === 'true') {
+    console.warn('SKIP_DB_TEST=true detectado — pulando verificação de variáveis de ambiente do banco (apenas para dev).');
+} else {
+    for (const envVar of requiredEnvVars) {
+        if (!process.env[envVar]) {
+            console.error(`Erro: Variável de ambiente ${envVar} não está definida!`);
+            process.exit(1);
+        }
     }
 }
 // DB_PASSWORD pode ser vazia para desenvolvimento local
@@ -121,7 +126,8 @@ async function getDbConnection() {
 app.get('/api/status', async (req, res) => {
     try {
         const connection = await getDbConnection();
-        await connection.end();
+            // release pooled connection instead of ending it
+            try { connection.release(); } catch (e) { try { await connection.end(); } catch (e2) {} }
         res.json({ 
             status: 'online',
             database: 'connected',
@@ -300,7 +306,7 @@ app.post('/api/register/:usertype', async (req, res) => {
         );
 
         if (existingUsers.length > 0) {
-            await connection.end();
+            try { connection.release(); } catch (e) { try { await connection.end(); } catch (e2) {} }
             return res.status(400).json({ error: 'Email já cadastrado.' });
         }
 
@@ -369,8 +375,10 @@ app.post('/api/register/:usertype', async (req, res) => {
             await connection.rollback();
             throw error;
         } finally {
-            await connection.end();
+            try { connection.release(); } catch (e) { try { await connection.end(); } catch (e2) {} }
         }
+    try { connection.release(); } catch (e) { try { await connection.end(); } catch (e2) {} }
+    try { connection.release(); } catch (e) { try { await connection.end(); } catch (e2) {} }
 
     } catch (error) {
         console.error('Erro no registro:', error);
@@ -395,6 +403,8 @@ app.post('/api/login', async (req, res) => {
             return res.status(400).json({ error: 'Email e senha são obrigatórios.' });
         }
 
+        console.log(`[login] tentativa de login para email=${email}, passwordPresent=${!!password}`);
+
         const connection = await getDbConnection();
 
         // Busca o usuário pelo email
@@ -403,16 +413,18 @@ app.post('/api/login', async (req, res) => {
             [email]
         );
 
-        await connection.end();
+        try { connection.release(); } catch (e) { try { await connection.end(); } catch (e2) {} }
 
         if (users.length === 0) {
             return res.status(401).json({ error: 'Usuário não encontrado.' });
         }
 
-        const user = users[0];
+    const user = users[0];
+    console.log(`[login] encontrado usuário id=${user.id_usuario}, hashLen=${user.senha ? user.senha.length : 0}`);
 
-        // Verifica a senha
-        const validPassword = await bcrypt.compare(password, user.senha);
+    // Verifica a senha
+    const validPassword = await bcrypt.compare(password, user.senha);
+    console.log(`[login] password match for email=${email}: ${validPassword}`);
         if (!validPassword) {
             return res.status(401).json({ error: 'Senha incorreta.' });
         }
