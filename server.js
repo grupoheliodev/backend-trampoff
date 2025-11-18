@@ -456,6 +456,99 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
+// Rota para buscar usuários por tipo
+app.get('/api/users/:userType', async (req, res) => {
+    const { userType } = req.params;
+    const validTypes = ['freelancer', 'contratante'];
+
+    if (!validTypes.includes(userType)) {
+        return res.status(400).json({ error: 'Tipo de usuário inválido.' });
+    }
+
+    let connection;
+    try {
+        connection = await getDbConnection();
+        // Busca usuários e seus dados específicos (nome da empresa para contratante)
+        let query;
+        if (userType === 'contratante') {
+            query = `
+                SELECT u.id_usuario as id, u.nome as name, u.email, c.nome_empresa as companyName
+                FROM usuario u
+                JOIN contratante c ON u.id_usuario = c.id_usuario
+                WHERE u.tipo = ?
+            `;
+        } else {
+            query = `
+                SELECT id_usuario as id, nome as name, email
+                FROM usuario
+                WHERE tipo = ?
+            `;
+        }
+        
+        const [users] = await connection.execute(query, [userType]);
+        
+        res.json(users);
+    } catch (error) {
+        console.error(`Erro ao buscar usuários (${userType}):`, error);
+        res.status(500).json({ error: 'Erro interno do servidor' });
+    } finally {
+        if (connection) try { connection.release(); } catch (e) {}
+    }
+});
+
+// Rota para buscar mensagens entre dois usuários
+app.get('/api/messages/:userId/:contactId', async (req, res) => {
+    const { userId, contactId } = req.params;
+    let connection;
+    try {
+        connection = await getDbConnection();
+        const [messages] = await connection.execute(
+            `SELECT id_mensagem as id, id_remetente as senderId, id_destinatario as receiverId, conteudo as content, data_envio as createdAt
+             FROM mensagem
+             WHERE (id_remetente = ? AND id_destinatario = ?) OR (id_remetente = ? AND id_destinatario = ?)
+             ORDER BY data_envio ASC`,
+            [userId, contactId, contactId, userId]
+        );
+        res.json(messages);
+    } catch (error) {
+        console.error('Erro ao buscar mensagens:', error);
+        res.status(500).json({ error: 'Erro interno do servidor' });
+    } finally {
+        if (connection) try { connection.release(); } catch (e) {}
+    }
+});
+
+// Rota para enviar uma mensagem
+app.post('/api/messages', async (req, res) => {
+    const { senderId, receiverId, content } = req.body;
+    if (!senderId || !receiverId || !content) {
+        return res.status(400).json({ error: 'Dados da mensagem incompletos.' });
+    }
+
+    let connection;
+    try {
+        connection = await getDbConnection();
+        const [result] = await connection.execute(
+            'INSERT INTO mensagem (id_remetente, id_destinatario, conteudo, data_envio) VALUES (?, ?, ?, NOW())',
+            [senderId, receiverId, content]
+        );
+        
+        const newMessage = {
+            id: result.insertId,
+            senderId,
+            receiverId,
+            content,
+            createdAt: new Date().toISOString()
+        };
+        res.status(201).json(newMessage);
+    } catch (error) {
+        console.error('Erro ao enviar mensagem:', error);
+        res.status(500).json({ error: 'Erro interno do servidor' });
+    } finally {
+        if (connection) try { connection.release(); } catch (e) {}
+    }
+});
+
 // Inicialização do servidor
 const PORT = process.env.PORT || 3000;
 
