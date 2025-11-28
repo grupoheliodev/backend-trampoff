@@ -1,0 +1,31 @@
+[
+  {
+    "id": 1763525057379,
+    "jobId": 1763473014121,
+    "employerId": 18,
+    "freelancerId": 17,
+    "price": 10220,
+    "status": "active",
+    "agreedAt": "2025-11-19T04:04:07.595Z"
+  },
+  {
+    "id": 1763525058993,
+    "jobId": 1763473014121,
+    "employerId": 18,
+    "freelancerId": 7,
+    "price": 10220,
+    "status": "active",
+    "agreedAt": "2025-11-19T04:04:14.163Z"
+  },
+  {
+    "id": 1763551502383,
+    "jobId": 1763473014121,
+    "employerId": 24,
+    "freelancerId": 17,
+    "price": 10220,
+    "status": "completed",
+    "agreedAt": "2025-11-19T11:25:00.209Z",
+    "completedAt": "2025-11-19T11:25:54.002Z",
+    "updatedAt": "2025-11-19T11:25:54.014Z"
+  }
+]

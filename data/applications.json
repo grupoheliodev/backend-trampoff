@@ -1,0 +1,45 @@
+[
+  {
+    "id": 1763514058935,
+    "jobId": "1763473014121",
+    "userId": 7,
+    "coverLetter": "Quero ter experiencia no meu curriculo",
+    "status": "accepted",
+    "createdAt": "2025-11-19T01:00:49.535Z",
+    "updatedAt": "2025-11-19T04:04:14.159Z"
+  },
+  {
+    "id": 1763519756255,
+    "jobId": "1763473014121",
+    "userId": 15,
+    "coverLetter": "",
+    "status": "rejected",
+    "createdAt": "2025-11-19T02:35:55.883Z",
+    "updatedAt": "2025-11-19T11:24:55.604Z"
+  },
+  {
+    "id": 1763524765286,
+    "jobId": "1763473014121",
+    "userId": 17,
+    "coverLetter": "Quero conhecimento",
+    "status": "accepted",
+    "createdAt": "2025-11-19T03:59:20.015Z",
+    "updatedAt": "2025-11-19T11:25:00.201Z"
+  },
+  {
+    "id": 1763549265955,
+    "jobId": "1763473014121",
+    "userId": 19,
+    "coverLetter": "",
+    "status": "pending",
+    "createdAt": "2025-11-19T10:47:43.594Z"
+  },
+  {
+    "id": 1763551322480,
+    "jobId": "1763473014121",
+    "userId": 23,
+    "coverLetter": "Buscar expericencia",
+    "status": "pending",
+    "createdAt": "2025-11-19T11:21:53.206Z"
+  }
+]

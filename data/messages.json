@@ -1,0 +1,44 @@
+[
+  {
+    "id": 1763520837387,
+    "senderId": 15,
+    "receiverId": 5,
+    "content": "Ola",
+    "createdAt": "2025-11-19T02:53:51.496Z"
+  },
+  {
+    "id": 1763523401854,
+    "senderId": 15,
+    "receiverId": 5,
+    "content": "Ola",
+    "createdAt": "2025-11-19T03:36:32.718Z"
+  },
+  {
+    "id": 1763524304184,
+    "senderId": 15,
+    "receiverId": 5,
+    "content": "Teste pós-migração",
+    "createdAt": "2025-11-19T03:51:42.270Z"
+  },
+  {
+    "id": 1763549585297,
+    "senderId": 15,
+    "receiverId": "1763464788817-8om7lih",
+    "content": "Ola",
+    "createdAt": "2025-11-19T10:53:01.060Z"
+  },
+  {
+    "id": 1763549592094,
+    "senderId": 15,
+    "receiverId": "1763464788817-8om7lih",
+    "content": "Ola",
+    "createdAt": "2025-11-19T10:53:02.296Z"
+  },
+  {
+    "id": 1763549584252,
+    "senderId": 15,
+    "receiverId": "1763464788817-8om7lih",
+    "content": "Ola",
+    "createdAt": "2025-11-19T10:53:03.063Z"
+  }
+]

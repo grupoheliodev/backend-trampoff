@@ -1,0 +1,90 @@
+[
+  {
+    "id": 1763521419196,
+    "name": "Teste Freelancer",
+    "email": "test.freelancer+1@example.com",
+    "phone": "(11) 99999-9999",
+    "userType": "freelancer",
+    "createdAt": "2025-11-19T03:03:30.743Z"
+  },
+  {
+    "id": 1763521472004,
+    "name": "Representante Teste",
+    "email": "test.employer+2@example.com",
+    "phone": "(11) 98888-8888",
+    "userType": "contratante",
+    "createdAt": "2025-11-19T03:04:29.139Z"
+  },
+  {
+    "id": 1763522774408,
+    "name": "UI Test",
+    "email": "ui.test+1@example.com",
+    "phone": "(11) 99999-9999",
+    "userType": "freelancer",
+    "createdAt": "2025-11-19T03:26:07.024Z"
+  },
+  {
+    "id": 17,
+    "name": "Jorge Augusto",
+    "email": "asa@asa.aq",
+    "phone": "(11) 1111-1111",
+    "userType": "freelancer",
+    "createdAt": "2025-11-19T03:57:54.136Z"
+  },
+  {
+    "id": 18,
+    "name": "Empresa 1",
+    "email": "empresa1@sam.com",
+    "phone": "(11) 1111-1111",
+    "userType": "contratante",
+    "createdAt": "2025-11-19T04:03:56.744Z"
+  },
+  {
+    "id": 19,
+    "name": "Eric de Souza",
+    "email": "eric@gmail.com",
+    "phone": "(11) 1111-1111",
+    "userType": "freelancer",
+    "createdAt": "2025-11-19T10:46:59.175Z"
+  },
+  {
+    "id": 20,
+    "name": "Empresa Corp 2",
+    "email": "empresa1@corp.com",
+    "phone": "(11) 11111-1111",
+    "userType": "contratante",
+    "createdAt": "2025-11-19T10:49:18.767Z"
+  },
+  {
+    "id": 21,
+    "name": "Empresa de Teste 1",
+    "email": "teste@teste.com",
+    "phone": "(01) 0101-0101",
+    "userType": "contratante",
+    "createdAt": "2025-11-19T10:54:36.422Z"
+  },
+  {
+    "id": 22,
+    "name": "Usuario Teste",
+    "email": "teste@user.com",
+    "phone": "(10) 1010-1010",
+    "userType": "freelancer",
+    "createdAt": "2025-11-19T10:57:18.416Z"
+  },
+  {
+    "id": 23,
+    "name": "Eduardo suzuki",
+    "email": "eduardo@gmail.com",
+    "phone": "(11) 93767-2220",
+    "userType": "freelancer",
+    "createdAt": "2025-11-19T11:20:59.688Z"
+  },
+  {
+    "id": 24,
+    "name": "Empresa Corp",
+    "email": "luis4335@email.com",
+    "phone": "(11) 1111-1111",
+    "userType": "contratante",
+    "createdAt": "2025-11-19T11:24:31.516Z"
+  }
+]

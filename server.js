@@ -89,6 +89,8 @@ const JWT_SECRET = 'IvyLindaMeuAmor'// Chave secreta para assinar os tokens JWT.
 // --- 4. Função Auxiliar para Conexão ---
 // Cria um pool de conexões com o banco de dados
 const pool = mysql.createPool(dbConfig);
+// Flag que indica se o banco de dados está disponível; usado para ativar fallbacks em dev
+let dbAvailable = true;
 
 // Função para testar a conexão
 async function testConnection() {
@@ -275,7 +277,9 @@ app.post('/api/register/:usertype', async (req, res) => {
         const { 
             name, 
             email, 
-            password, 
+            password,
+            passwordConfirmation,
+            phone,
             companyName,  // apenas para contratante
             description, 
             skills,       // apenas para freelancer
@@ -287,6 +291,19 @@ app.post('/api/register/:usertype', async (req, res) => {
             return res.status(400).json({ error: 'Nome, email e senha são obrigatórios.' });
         }
 
+        // Aceita diferentes nomes de campo para confirmação de senha (camelCase, snake_case, aliases)
+        const pwdConfirm = passwordConfirmation || req.body.password_confirmation || req.body.passwordConfirm || req.body.confirmPassword || req.body.confirmation;
+        console.log('Password confirmation received (normalized):', pwdConfirm !== undefined ? '[present]' : '[missing]');
+        if (!pwdConfirm || password !== pwdConfirm) {
+            return res.status(400).json({ error: 'Confirmação de senha inválida.' });
+        }
+
+        // Aceita alias de telefone também, para compatibilidade com clientes antigos
+        const phoneVal = phone || req.body.phone_number || req.body.telefone || req.body.telefone_celular;
+        if (!phoneVal) {
+            return res.status(400).json({ error: 'Número de telefone é obrigatório.' });
+        }
+
         if (userType !== 'freelancer' && userType !== 'contratante') {
             return res.status(400).json({ error: 'Tipo de usuário inválido.' });
         }
@@ -294,6 +311,23 @@ app.post('/api/register/:usertype', async (req, res) => {
         // Validações específicas por tipo
         if (userType === 'contratante' && !companyName) {
             return res.status(400).json({ error: 'Nome da empresa é obrigatório para contratantes.' });
+        }
+
+        // If DB is not available, use file-backed users storage
+        if (!dbAvailable) {
+            // create fallback user
+            try {
+                const users = await readJsonFile('users.json');
+                const id = generateId();
+                const createdAt = new Date().toISOString();
+                const newUser = { id, name, email, phone, userType, createdAt };
+                users.push(newUser);
+                await writeJsonFile('users.json', users);
+                return res.status(201).json({ message: 'Usuário criado em modo offline (fallback).', userId: id, user: newUser });
+            } catch (e) {
+                console.error('Erro ao salvar usuário no fallback (file):', e);
+                return res.status(500).json({ error: 'Erro interno ao salvar usuário (fallback).' });
+            }
         }
 
         connection = await getDbConnection();
@@ -333,6 +367,20 @@ app.post('/api/register/:usertype', async (req, res) => {
             );
             const userId = userResult.insertId;
             console.log('Usuário inserido com sucesso, ID:', userId);
+
+            // Tenta salvar telefone na tabela `usuario` caso a coluna exista
+            try {
+                await connection.execute('UPDATE usuario SET telefone = ? WHERE id_usuario = ?', [phone, userId]);
+            } catch (e) {
+                console.warn('Não foi possível salvar telefone na tabela `usuario` (coluna possivelmente ausente). Salvando no fallback de usuários.');
+                try {
+                    const users = await readJsonFile('users.json');
+                    users.push({ id: userId, name, email, phone, userType, createdAt: new Date().toISOString() });
+                    await writeJsonFile('users.json', users);
+                } catch (err) {
+                    console.error('Erro ao salvar telefone no fallback:', err);
+                }
+            }
 
             // Insere dados específicos baseado no tipo de usuário
             if (userType === 'freelancer') {
@@ -497,8 +545,73 @@ app.get('/api/users/:userType', async (req, res) => {
 });
 
 // Rota para buscar mensagens entre dois usuários
+<<<<<<< HEAD
 app.get('/api/messages/:userId/:contactId', async (req, res) => {
     const { userId, contactId } = req.params;
+=======
+// Suporte a query params: /api/messages?user1=...&user2=... (frontend antigo usa esse formato)
+app.get('/api/messages', async (req, res) => {
+    const { user1, user2 } = req.query;
+    if (!user1 || !user2) {
+        return res.status(400).json({ error: 'Parâmetros user1 e user2 são necessários.' });
+    }
+    // If DB not available, fallback to file storage
+    if (!dbAvailable) {
+        try {
+            const msgs = await readJsonFile('messages.json');
+            const filtered = (msgs || []).filter(m => (String(m.senderId) === String(user1) && String(m.receiverId) === String(user2)) || (String(m.senderId) === String(user2) && String(m.receiverId) === String(user1)));
+            return res.json(filtered);
+        } catch (e) {
+            console.error('Erro ao ler mensagens do fallback (file):', e);
+            return res.status(500).json({ error: 'Erro interno' });
+        }
+    }
+
+    let connection;
+    try {
+        connection = await getDbConnection();
+        const [messages] = await connection.execute(
+            `SELECT id_mensagem as id, id_remetente as senderId, id_destinatario as receiverId, mensagem as content, data_envio as createdAt
+             FROM mensagem
+             WHERE (id_remetente = ? AND id_destinatario = ?) OR (id_remetente = ? AND id_destinatario = ?)
+             ORDER BY data_envio ASC`,
+            [user1, user2, user2, user1]
+        );
+        res.json(messages);
+    } catch (error) {
+        console.error('Erro ao buscar mensagens (query):', error);
+        if (error && error.code === 'ER_BAD_FIELD_ERROR') {
+            console.warn('[DB] Detected ER_BAD_FIELD_ERROR (possible schema mismatch). Switching to file fallback mode.');
+            dbAvailable = false;
+        }
+        // fallback to file storage on SQL errors
+        try {
+            const msgs = await readJsonFile('messages.json');
+            const filtered = (msgs || []).filter(m => (String(m.senderId) === String(user1) && String(m.receiverId) === String(user2)) || (String(m.senderId) === String(user2) && String(m.receiverId) === String(user1)));
+            return res.json(filtered);
+        } catch (e) {
+            return res.status(500).json({ error: 'Erro interno do servidor' });
+        }
+    } finally {
+        if (connection) try { connection.release(); } catch (e) {}
+    }
+});
+
+app.get('/api/messages/:userId/:contactId', async (req, res) => {
+    const { userId, contactId } = req.params;
+    // Fallback to file storage when DB unavailable
+    if (!dbAvailable) {
+        try {
+            const msgs = await readJsonFile('messages.json');
+            const filtered = (msgs || []).filter(m => (String(m.senderId) === String(userId) && String(m.receiverId) === String(contactId)) || (String(m.senderId) === String(contactId) && String(m.receiverId) === String(userId)));
+            return res.json(filtered);
+        } catch (e) {
+            console.error('Erro ao ler mensagens do fallback (file):', e);
+            return res.status(500).json({ error: 'Erro interno' });
+        }
+    }
+
+>>>>>>> 29de3da (ta indo)
     let connection;
     try {
         connection = await getDbConnection();
@@ -512,7 +625,22 @@ app.get('/api/messages/:userId/:contactId', async (req, res) => {
         res.json(messages);
     } catch (error) {
         console.error('Erro ao buscar mensagens:', error);
+<<<<<<< HEAD
         res.status(500).json({ error: 'Erro interno do servidor' });
+=======
+        if (error && error.code === 'ER_BAD_FIELD_ERROR') {
+            console.warn('[DB] Detected ER_BAD_FIELD_ERROR (possible schema mismatch). Switching to file fallback mode.');
+            dbAvailable = false;
+        }
+        // fallback to file storage on SQL errors
+        try {
+            const msgs = await readJsonFile('messages.json');
+            const filtered = (msgs || []).filter(m => (String(m.senderId) === String(userId) && String(m.receiverId) === String(contactId)) || (String(m.senderId) === String(contactId) && String(m.receiverId) === String(userId)));
+            return res.json(filtered);
+        } catch (e) {
+            return res.status(500).json({ error: 'Erro interno do servidor' });
+        }
+>>>>>>> 29de3da (ta indo)
     } finally {
         if (connection) try { connection.release(); } catch (e) {}
     }
@@ -520,15 +648,53 @@ app.get('/api/messages/:userId/:contactId', async (req, res) => {
 
 // Rota para enviar uma mensagem
 app.post('/api/messages', async (req, res) => {
+<<<<<<< HEAD
     const { senderId, receiverId, content } = req.body;
     if (!senderId || !receiverId || !content) {
         return res.status(400).json({ error: 'Dados da mensagem incompletos.' });
+=======
+    let { senderId, receiverId, content } = req.body || {};
+    console.log('[POST /api/messages] body:', req.body);
+
+    // Compatibilidade: em alguns fluxos o frontend envia um objeto 'content' vindo do Firebase.
+    if (!senderId || !receiverId || content === undefined || content === null) {
+        return res.status(400).json({ error: 'Dados da mensagem incompletos. senderId, receiverId e content são necessários.' });
+    }
+
+    // Se content for objeto (ex: Firebase timestamp ou estrutura), stringify para armazenar no SQL
+    if (typeof content === 'object') {
+        try {
+            content = JSON.stringify(content);
+        } catch (e) {
+            content = String(content);
+        }
+    }
+
+    // Garantir ids numéricos quando possível
+    const sId = Number(senderId);
+    const rId = Number(receiverId);
+
+    // If DB not available, write to file-backed messages storage
+    if (!dbAvailable) {
+        try {
+            const msgs = await readJsonFile('messages.json');
+            const id = generateId();
+            const newMessage = { id, senderId: isNaN(sId) ? senderId : sId, receiverId: isNaN(rId) ? receiverId : rId, content, createdAt: new Date().toISOString() };
+            msgs.push(newMessage);
+            await writeJsonFile('messages.json', msgs);
+            return res.status(201).json(newMessage);
+        } catch (e) {
+            console.error('Erro ao gravar mensagem no fallback (file):', e && e.stack ? e.stack : e);
+            return res.status(500).json({ error: 'Erro interno ao gravar mensagem (fallback)', details: e && e.message ? e.message : String(e) });
+        }
+>>>>>>> 29de3da (ta indo)
     }
 
     let connection;
     try {
         connection = await getDbConnection();
         const [result] = await connection.execute(
+<<<<<<< HEAD
             'INSERT INTO mensagem (id_remetente, id_destinatario, conteudo, data_envio) VALUES (?, ?, ?, NOW())',
             [senderId, receiverId, content]
         );
@@ -537,29 +703,457 @@ app.post('/api/messages', async (req, res) => {
             id: result.insertId,
             senderId,
             receiverId,
+=======
+            'INSERT INTO mensagem (id_remetente, id_destinatario, mensagem, data_envio) VALUES (?, ?, ?, NOW())',
+            [isNaN(sId) ? senderId : sId, isNaN(rId) ? receiverId : rId, content]
+        );
+
+        const newMessage = {
+            id: result.insertId,
+            senderId: isNaN(sId) ? senderId : sId,
+            receiverId: isNaN(rId) ? receiverId : rId,
+>>>>>>> 29de3da (ta indo)
             content,
             createdAt: new Date().toISOString()
         };
         res.status(201).json(newMessage);
     } catch (error) {
+<<<<<<< HEAD
         console.error('Erro ao enviar mensagem:', error);
         res.status(500).json({ error: 'Erro interno do servidor' });
+=======
+        console.error('Erro ao enviar mensagem:', error && error.stack ? error.stack : error);
+        if (error && error.code === 'ER_BAD_FIELD_ERROR') {
+            console.warn('[DB] Detected ER_BAD_FIELD_ERROR on INSERT (possible schema mismatch). Switching to file fallback mode.');
+            dbAvailable = false;
+        }
+        // Fallback: persist message to file storage and return success so frontend can continue
+        try {
+            const msgs = await readJsonFile('messages.json');
+            const id = generateId();
+            const fallbackMessage = { id, senderId: isNaN(sId) ? senderId : sId, receiverId: isNaN(rId) ? receiverId : rId, content, createdAt: new Date().toISOString() };
+            msgs.push(fallbackMessage);
+            try {
+                await writeJsonFile('messages.json', msgs);
+                console.info('[POST /api/messages] mensagem salva no fallback (file) com id=', id);
+                return res.status(201).json(fallbackMessage);
+            } catch (writeErr) {
+                console.error('Erro ao salvar fallback de mensagem:', writeErr && writeErr.stack ? writeErr.stack : writeErr);
+                return res.status(500).json({ error: 'Erro interno ao salvar mensagem (fallback)', details: writeErr && writeErr.message ? writeErr.message : String(writeErr) });
+            }
+        } catch (e) {
+            console.error('Erro ao preparar fallback de mensagem:', e && e.stack ? e.stack : e);
+            return res.status(500).json({ error: 'Erro interno do servidor', details: error && error.message ? error.message : String(error) });
+        }
+>>>>>>> 29de3da (ta indo)
     } finally {
         if (connection) try { connection.release(); } catch (e) {}
     }
 });
 
+<<<<<<< HEAD
+=======
+// === Simple JSON file storage fallback (dev) ===
+const fs = require('fs').promises;
+const DATA_DIR = path.resolve(__dirname, 'data');
+
+async function ensureDataDir() {
+    try {
+        await fs.mkdir(DATA_DIR, { recursive: true });
+    } catch (e) {}
+}
+
+async function readJsonFile(name) {
+    await ensureDataDir();
+    const p = path.join(DATA_DIR, name);
+    try {
+        const raw = await fs.readFile(p, 'utf8');
+        return JSON.parse(raw || '[]');
+    } catch (e) {
+        return [];
+    }
+}
+
+async function writeJsonFile(name, data) {
+    await ensureDataDir();
+    const p = path.join(DATA_DIR, name);
+    await fs.writeFile(p, JSON.stringify(data, null, 2), 'utf8');
+}
+
+function generateId() {
+    return Date.now() + Math.floor(Math.random() * 10000);
+}
+
+// --- Jobs endpoints (file-backed for dev) ---
+app.get('/api/jobs', async (req, res) => {
+    try {
+        const jobs = await readJsonFile('jobs.json');
+        res.json(jobs);
+    } catch (e) {
+        console.error('Erro em GET /api/jobs', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+app.post('/api/jobs', async (req, res) => {
+    try {
+        const { ownerId, title, description, category, budget, price } = req.body;
+        if (!ownerId || !title) return res.status(400).json({ error: 'ownerId e title obrigatórios' });
+        const jobs = await readJsonFile('jobs.json');
+        const id = generateId();
+        const job = {
+            id,
+            ownerId,
+            title,
+            description: description || '',
+            category: category || '',
+            budget: budget || null,
+            price: price != null ? price : (budget ? Number(String(budget).replace(/[^0-9\.\,]/g, '').replace(/,/g, '.')) : 0),
+            status: 'open',
+            createdAt: new Date().toISOString()
+        };
+        jobs.unshift(job);
+        await writeJsonFile('jobs.json', jobs);
+        res.status(201).json(job);
+    } catch (e) {
+        console.error('Erro em POST /api/jobs', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+app.put('/api/jobs/:id', async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        const updates = req.body || {};
+        const jobs = await readJsonFile('jobs.json');
+        const idx = jobs.findIndex(j => Number(j.id) === id);
+        if (idx === -1) return res.status(404).json({ error: 'Job não encontrado' });
+        jobs[idx] = { ...jobs[idx], ...updates, updatedAt: new Date().toISOString() };
+        await writeJsonFile('jobs.json', jobs);
+        res.json(jobs[idx]);
+    } catch (e) {
+        console.error('Erro em PUT /api/jobs/:id', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+app.delete('/api/jobs/:id', async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        let jobs = await readJsonFile('jobs.json');
+        jobs = jobs.filter(j => Number(j.id) !== id);
+        await writeJsonFile('jobs.json', jobs);
+        res.json({ success: true });
+    } catch (e) {
+        console.error('Erro em DELETE /api/jobs/:id', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+// --- Projects endpoints (file-backed for dev) ---
+app.get('/api/projects', async (req, res) => {
+    try {
+        const ownerId = req.query.ownerId;
+        const projects = await readJsonFile('projects.json');
+        if (ownerId) return res.json(projects.filter(p => String(p.ownerId) === String(ownerId)));
+        res.json(projects);
+    } catch (e) {
+        console.error('Erro em GET /api/projects', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+app.post('/api/projects', async (req, res) => {
+    try {
+        const { ownerId, title, description } = req.body;
+        if (!ownerId || !title) return res.status(400).json({ error: 'ownerId e title obrigatórios' });
+        const projects = await readJsonFile('projects.json');
+        const id = generateId();
+        const project = { id, ownerId, title, description: description || '', createdAt: new Date().toISOString() };
+        projects.unshift(project);
+        await writeJsonFile('projects.json', projects);
+        res.status(201).json(project);
+    } catch (e) {
+        console.error('Erro em POST /api/projects', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+app.put('/api/projects/:id', async (req, res) => {
+    try {
+        const id = req.params.id;
+        const updates = req.body || {};
+        const projects = await readJsonFile('projects.json');
+        const idx = projects.findIndex(p => String(p.id) === String(id));
+        if (idx === -1) return res.status(404).json({ error: 'Project not found' });
+        projects[idx] = { ...projects[idx], ...updates, updatedAt: new Date().toISOString() };
+        await writeJsonFile('projects.json', projects);
+        res.json(projects[idx]);
+    } catch (e) {
+        console.error('Erro em PUT /api/projects/:id', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+app.delete('/api/projects/:id', async (req, res) => {
+    try {
+        const id = req.params.id;
+        let projects = await readJsonFile('projects.json');
+        projects = projects.filter(p => String(p.id) !== String(id));
+        await writeJsonFile('projects.json', projects);
+        res.json({ success: true });
+    } catch (e) {
+        console.error('Erro em DELETE /api/projects/:id', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+// --- Applications endpoints ---
+app.get('/api/jobs/:jobId/applications', async (req, res) => {
+    try {
+        const jobId = req.params.jobId;
+        const apps = await readJsonFile('applications.json');
+        res.json(apps.filter(a => String(a.jobId) === String(jobId)));
+    } catch (e) {
+        console.error('Erro em GET /api/jobs/:jobId/applications', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+app.post('/api/jobs/:jobId/applications', async (req, res) => {
+    try {
+        const jobId = req.params.jobId;
+        const { userId, coverLetter } = req.body;
+        if (!userId) return res.status(400).json({ error: 'userId obrigatório' });
+        const apps = await readJsonFile('applications.json');
+        if (apps.find(a => String(a.jobId) === String(jobId) && String(a.userId) === String(userId))) {
+            return res.status(409).json({ error: 'Já aplicada' });
+        }
+        const application = { id: generateId(), jobId, userId, coverLetter: coverLetter || '', status: 'pending', createdAt: new Date().toISOString() };
+        apps.push(application);
+        await writeJsonFile('applications.json', apps);
+        res.status(201).json(application);
+    } catch (e) {
+        console.error('Erro em POST /api/jobs/:jobId/applications', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+// --- Project applications (similar to job applications) ---
+app.get('/api/projects/:projectId/applications', async (req, res) => {
+    try {
+        const projectId = req.params.projectId;
+        const apps = await readJsonFile('project_applications.json');
+        res.json(apps.filter(a => String(a.projectId) === String(projectId)));
+    } catch (e) {
+        console.error('Erro em GET /api/projects/:projectId/applications', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+app.post('/api/projects/:projectId/applications', async (req, res) => {
+    try {
+        const projectId = req.params.projectId;
+        const { userId, message } = req.body;
+        if (!userId) return res.status(400).json({ error: 'userId obrigatório' });
+
+        const projects = await readJsonFile('projects.json');
+        const project = projects.find(p => String(p.id) === String(projectId));
+        if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
+
+        const apps = await readJsonFile('project_applications.json');
+        if (apps.find(a => String(a.projectId) === String(projectId) && String(a.userId) === String(userId))) {
+            return res.status(409).json({ error: 'Já inscrito neste projeto' });
+        }
+
+        const application = { id: generateId(), projectId, userId, message: message || '', status: 'pending', createdAt: new Date().toISOString() };
+        apps.push(application);
+        await writeJsonFile('project_applications.json', apps);
+
+        // create a notification for the project owner
+        try {
+            const notifications = await readJsonFile('notifications.json');
+            const note = { id: generateId(), userId: project.ownerId, type: 'project_application', data: { projectId, applicantId: userId, applicationId: application.id }, read: false, createdAt: new Date().toISOString() };
+            notifications.push(note);
+            await writeJsonFile('notifications.json', notifications);
+        } catch (e) {
+            console.warn('Falha ao criar notificação (não crítica):', e && e.message ? e.message : e);
+        }
+
+        res.status(201).json(application);
+    } catch (e) {
+        console.error('Erro em POST /api/projects/:projectId/applications', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+// Notifications endpoints
+app.get('/api/notifications', async (req, res) => {
+    try {
+        const userId = req.query.userId;
+        const notes = await readJsonFile('notifications.json');
+        if (userId) return res.json(notes.filter(n => String(n.userId) === String(userId)));
+        res.json(notes);
+    } catch (e) {
+        console.error('Erro em GET /api/notifications', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+app.put('/api/notifications/:id', async (req, res) => {
+    try {
+        const id = req.params.id;
+        const updates = req.body || {};
+        const notes = await readJsonFile('notifications.json');
+        const idx = notes.findIndex(n => String(n.id) === String(id));
+        if (idx === -1) return res.status(404).json({ error: 'Notification not found' });
+        notes[idx] = { ...notes[idx], ...updates, updatedAt: new Date().toISOString() };
+        await writeJsonFile('notifications.json', notes);
+        res.json(notes[idx]);
+    } catch (e) {
+        console.error('Erro em PUT /api/notifications/:id', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+app.put('/api/applications/:id', async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        const updates = req.body || {};
+        const apps = await readJsonFile('applications.json');
+        const idx = apps.findIndex(a => Number(a.id) === id);
+        if (idx === -1) return res.status(404).json({ error: 'Application not found' });
+        apps[idx] = { ...apps[idx], ...updates, updatedAt: new Date().toISOString() };
+        await writeJsonFile('applications.json', apps);
+        res.json(apps[idx]);
+    } catch (e) {
+        console.error('Erro em PUT /api/applications/:id', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+// --- Contracts endpoints ---
+app.post('/api/contracts', async (req, res) => {
+    try {
+        const { jobId, employerId, freelancerId, agreedAt, price } = req.body;
+        if (!jobId || !employerId || !freelancerId) return res.status(400).json({ error: 'Dados incompletos' });
+        const contracts = await readJsonFile('contracts.json');
+        const contract = { id: generateId(), jobId, employerId, freelancerId, price: price || 0, status: 'active', agreedAt: agreedAt || new Date().toISOString() };
+        contracts.push(contract);
+        await writeJsonFile('contracts.json', contracts);
+        res.status(201).json(contract);
+    } catch (e) {
+        console.error('Erro em POST /api/contracts', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+app.get('/api/contracts', async (req, res) => {
+    try {
+        const userId = req.query.userId;
+        const contracts = await readJsonFile('contracts.json');
+        if (userId) {
+            return res.json(contracts.filter(c => String(c.employerId) === String(userId) || String(c.freelancerId) === String(userId)));
+        }
+        res.json(contracts);
+    } catch (e) {
+        console.error('Erro em GET /api/contracts', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+app.put('/api/contracts/:id', async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        const updates = req.body || {};
+        const contracts = await readJsonFile('contracts.json');
+        const idx = contracts.findIndex(c => Number(c.id) === id);
+        if (idx === -1) return res.status(404).json({ error: 'Contract not found' });
+        contracts[idx] = { ...contracts[idx], ...updates, updatedAt: new Date().toISOString() };
+        await writeJsonFile('contracts.json', contracts);
+        res.json(contracts[idx]);
+    } catch (e) {
+        console.error('Erro em PUT /api/contracts/:id', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+// --- Reviews endpoints ---
+app.post('/api/reviews', async (req, res) => {
+    try {
+        const { reviewerId, targetUserId, contractId, jobId, rating, comment } = req.body;
+        if (!reviewerId || !targetUserId) return res.status(400).json({ error: 'Dados incompletos' });
+        const reviews = await readJsonFile('reviews.json');
+        const review = { id: generateId(), reviewerId, targetUserId, contractId: contractId || null, jobId: jobId || null, rating: rating || 5, comment: comment || '', createdAt: new Date().toISOString() };
+        reviews.push(review);
+        await writeJsonFile('reviews.json', reviews);
+        res.status(201).json(review);
+    } catch (e) {
+        console.error('Erro em POST /api/reviews', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+app.get('/api/reviews', async (req, res) => {
+    try {
+        const userId = req.query.userId;
+        const jobId = req.query.jobId;
+        const reviews = await readJsonFile('reviews.json');
+        if (userId) return res.json(reviews.filter(r => String(r.targetUserId) === String(userId)));
+        if (jobId) return res.json(reviews.filter(r => String(r.jobId) === String(jobId)));
+        res.json(reviews);
+    } catch (e) {
+        console.error('Erro em GET /api/reviews', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+app.get('/api/reviews/stats', async (req, res) => {
+    try {
+        const userId = req.query.userId;
+        if (!userId) return res.status(400).json({ error: 'userId é necessário' });
+        const reviews = await readJsonFile('reviews.json');
+        const list = reviews.filter(r => String(r.targetUserId) === String(userId));
+        const count = list.length;
+        const average = count === 0 ? 0 : list.reduce((s, r) => s + (Number(r.rating) || 0), 0) / count;
+        res.json({ count, average });
+    } catch (e) {
+        console.error('Erro em GET /api/reviews/stats', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+
+>>>>>>> 29de3da (ta indo)
 // Inicialização do servidor
 const PORT = process.env.PORT || 3000;
 
 // Função para iniciar o servidor
 async function startServer() {
     try {
+        // Garantir diretório e arquivos de dados para fallback (evita erros de I/O quando SQL falha)
+        try {
+            await ensureDataDir();
+            const filesToEnsure = ['messages.json','users.json','jobs.json','projects.json','applications.json','contracts.json','reviews.json'];
+            for (const fname of filesToEnsure) {
+                try {
+                    const content = await readJsonFile(fname); // retorna [] se não existir
+                    await writeJsonFile(fname, content);
+                } catch (e) {
+                    console.warn(`Não foi possível garantir arquivo ${fname}:`, e && e.message ? e.message : e);
+                }
+            }
+            console.info('[startup] pasta de dados e arquivos iniciais garantidos.');
+        } catch (e) {
+            console.warn('[startup] falha ao preparar fallback de arquivos de dados:', e && e.message ? e.message : e);
+        }
         // Testa a conexão com o banco antes de iniciar o servidor
         const isConnected = await testConnection();
         if (!isConnected) {
-            console.error('Não foi possível estabelecer conexão com o banco de dados. Servidor não iniciado.');
-            process.exit(1);
+            console.warn('Não foi possível estabelecer conexão com o banco de dados. Iniciando servidor em modo fallback (arquivo local).');
+            dbAvailable = false;
+        } else {
+            dbAvailable = true;
         }
 
         app.listen(PORT, () => {
