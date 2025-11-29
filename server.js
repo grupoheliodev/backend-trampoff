@@ -32,9 +32,20 @@ if (process.env.SKIP_DB_TEST === 'true') {
 // DB_PASSWORD pode ser vazia para desenvolvimento local
 process.env.DB_PASSWORD = process.env.DB_PASSWORD || '';
 
+// Normaliza host/porta: permite DB_HOST="host:porta" ou variáveis separadas.
+const rawHost = process.env.DB_HOST || 'localhost';
+let normalizedHost = rawHost;
+let hostPortFragment;
+if (rawHost.includes(':')) {
+    const parts = rawHost.split(':');
+    normalizedHost = parts[0];
+    hostPortFragment = parts[1];
+}
+const normalizedPort = parseInt(process.env.DB_PORT || hostPortFragment || '3306', 10);
+
 console.log('Configurações do banco de dados (iniciando):', {
-    host: process.env.DB_HOST,
-    port: process.env.DB_PORT || '8181',
+    host: normalizedHost,
+    port: normalizedPort,
     user: process.env.DB_USER,
     database: process.env.DB_DATABASE
 });
@@ -50,6 +61,7 @@ const mysql = require('mysql2/promise');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const { db: firebaseDb } = require('./firebase');
 
 // 2.1) Inicializa o app Express, habilita CORS e JSON parsing
 const app = express();
@@ -69,8 +81,8 @@ app.use((req, res, next) => {
 // Objeto que armazena as credenciais do banco de dados, lidas do arquivo .env.
 
 const dbConfig = {
-    host: (process.env.DB_HOST || '').split(':')[0] || 'localhost',
-    port: parseInt(process.env.DB_PORT, 10) || 3306,
+    host: normalizedHost,
+    port: normalizedPort,
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
     database: process.env.DB_DATABASE,
@@ -113,6 +125,22 @@ async function testConnection() {
     }
 }
 
+// Testa conectividade básica com Firebase (Firestore). Faz escrita leve em documento de health.
+async function testFirebase() {
+    if (!firebaseDb) {
+        console.error('[firebase] Instância Firestore ausente (db=null).');
+        return false;
+    }
+    try {
+        const pingDoc = firebaseDb.collection('_health').doc('startup');
+        await pingDoc.set({ ts: new Date().toISOString() }, { merge: true });
+        return true;
+    } catch (e) {
+        console.error('[firebase] Falha ao escrever ping:', e && e.message ? e.message : e);
+        return false;
+    }
+}
+
 async function getDbConnection() {
     try {
         const connection = await pool.getConnection();
@@ -142,6 +170,40 @@ app.get('/api/status', async (req, res) => {
             error: error.message,
             timestamp: new Date().toISOString()
         });
+    }
+});
+
+// Busca unificada: usuários, jobs, projects e mensagens (file/DB + Firebase best-effort)
+app.get('/api/search', async (req, res) => {
+    try {
+        const q = (req.query.q || '').toString().trim().toLowerCase();
+        if (!q || q.length < 2) return res.json({ users: [], jobs: [], projects: [], messages: [] });
+        const users = await readJsonFile('users.json');
+        const jobs = await readJsonFile('jobs.json');
+        const projects = await readJsonFile('projects.json');
+        const messagesLocal = await readJsonFile('messages.json');
+        const usersRes = (users || []).filter(u => ((u.name||'')+(u.email||'')).toLowerCase().includes(q));
+        const jobsRes = (jobs || []).filter(j => ((j.title||'')+(j.description||'')).toLowerCase().includes(q));
+        const projectsRes = (projects || []).filter(p => ((p.title||'')+(p.description||'')).toLowerCase().includes(q));
+        let messagesRes = (messagesLocal || []).filter(m => (m.content||'').toString().toLowerCase().includes(q));
+        // Best-effort Firebase messages merge
+        try {
+            if (firebaseDb) {
+                const snap = await firebaseDb.collection('messages').orderBy('createdAt','desc').limit(100).get();
+                const fbMsgs = snap.docs.map(d => ({ id: d.id, ...(d.data()||{}) }));
+                const filtered = fbMsgs.filter(m => (String(m.content||'').toLowerCase().includes(q)));
+                // merge by id
+                const byId = new Map(messagesRes.map(m => [String(m.id), m]));
+                for (const m of filtered) { const k = String(m.id); if (!byId.has(k)) byId.set(k, m); }
+                messagesRes = Array.from(byId.values());
+            }
+        } catch (e) {
+            console.warn('[search] falha ao consultar Firebase:', e && e.message ? e.message : e);
+        }
+        res.json({ users: usersRes, jobs: jobsRes, projects: projectsRes, messages: messagesRes });
+    } catch (e) {
+        console.error('Erro em GET /api/search', e);
+        res.status(500).json({ error: 'Erro interno' });
     }
 });
 
@@ -544,34 +606,34 @@ app.get('/api/users/:userType', async (req, res) => {
     }
 });
 
-// Rota para buscar mensagens entre dois usuários
-<<<<<<< HEAD
-app.get('/api/messages/:userId/:contactId', async (req, res) => {
-    const { userId, contactId } = req.params;
-=======
-// Suporte a query params: /api/messages?user1=...&user2=... (frontend antigo usa esse formato)
+// Suporte novo e antigo: query params (user1/user2) e route params (:userId/:contactId)
 app.get('/api/messages', async (req, res) => {
     const { user1, user2 } = req.query;
-    if (!user1 || !user2) {
-        return res.status(400).json({ error: 'Parâmetros user1 e user2 são necessários.' });
-    }
-    // If DB not available, fallback to file storage
+    if (!user1 || !user2) return res.status(400).json({ error: 'Parâmetros user1 e user2 são necessários.' });
+    // Tenta buscar também no Firebase quando disponível (best-effort merge)
+    try {
+        if (firebaseDb) {
+            const snap = await firebaseDb.collection('messages')
+                .where('senderId', 'in', [Number(user1), String(user1)])
+                .get();
+            // Nota: consultas compostas no Firestore são limitadas; manteremos fonte principal no SQL/arquivo.
+        }
+    } catch {}
     if (!dbAvailable) {
         try {
             const msgs = await readJsonFile('messages.json');
             const filtered = (msgs || []).filter(m => (String(m.senderId) === String(user1) && String(m.receiverId) === String(user2)) || (String(m.senderId) === String(user2) && String(m.receiverId) === String(user1)));
             return res.json(filtered);
         } catch (e) {
-            console.error('Erro ao ler mensagens do fallback (file):', e);
+            console.error('Erro ao ler mensagens fallback:', e);
             return res.status(500).json({ error: 'Erro interno' });
         }
     }
-
     let connection;
     try {
         connection = await getDbConnection();
         const [messages] = await connection.execute(
-            `SELECT id_mensagem as id, id_remetente as senderId, id_destinatario as receiverId, mensagem as content, data_envio as createdAt
+            `SELECT id_mensagem as id, id_remetente as senderId, id_destinatario as receiverId, conteudo as content, data_envio as createdAt
              FROM mensagem
              WHERE (id_remetente = ? AND id_destinatario = ?) OR (id_remetente = ? AND id_destinatario = ?)
              ORDER BY data_envio ASC`,
@@ -581,10 +643,9 @@ app.get('/api/messages', async (req, res) => {
     } catch (error) {
         console.error('Erro ao buscar mensagens (query):', error);
         if (error && error.code === 'ER_BAD_FIELD_ERROR') {
-            console.warn('[DB] Detected ER_BAD_FIELD_ERROR (possible schema mismatch). Switching to file fallback mode.');
+            console.warn('[DB] ER_BAD_FIELD_ERROR; ativando fallback file.');
             dbAvailable = false;
         }
-        // fallback to file storage on SQL errors
         try {
             const msgs = await readJsonFile('messages.json');
             const filtered = (msgs || []).filter(m => (String(m.senderId) === String(user1) && String(m.receiverId) === String(user2)) || (String(m.senderId) === String(user2) && String(m.receiverId) === String(user1)));
@@ -592,26 +653,22 @@ app.get('/api/messages', async (req, res) => {
         } catch (e) {
             return res.status(500).json({ error: 'Erro interno do servidor' });
         }
-    } finally {
-        if (connection) try { connection.release(); } catch (e) {}
-    }
+    } finally { if (connection) try { connection.release(); } catch (e) {} }
 });
 
 app.get('/api/messages/:userId/:contactId', async (req, res) => {
     const { userId, contactId } = req.params;
-    // Fallback to file storage when DB unavailable
+    // idem: fonte principal permanece SQL/arquivo; Firebase é apenas espelho de escrita
     if (!dbAvailable) {
         try {
             const msgs = await readJsonFile('messages.json');
             const filtered = (msgs || []).filter(m => (String(m.senderId) === String(userId) && String(m.receiverId) === String(contactId)) || (String(m.senderId) === String(contactId) && String(m.receiverId) === String(userId)));
             return res.json(filtered);
         } catch (e) {
-            console.error('Erro ao ler mensagens do fallback (file):', e);
+            console.error('Erro ao ler mensagens fallback:', e);
             return res.status(500).json({ error: 'Erro interno' });
         }
     }
-
->>>>>>> 29de3da (ta indo)
     let connection;
     try {
         connection = await getDbConnection();
@@ -625,56 +682,27 @@ app.get('/api/messages/:userId/:contactId', async (req, res) => {
         res.json(messages);
     } catch (error) {
         console.error('Erro ao buscar mensagens:', error);
-<<<<<<< HEAD
-        res.status(500).json({ error: 'Erro interno do servidor' });
-=======
         if (error && error.code === 'ER_BAD_FIELD_ERROR') {
-            console.warn('[DB] Detected ER_BAD_FIELD_ERROR (possible schema mismatch). Switching to file fallback mode.');
+            console.warn('[DB] ER_BAD_FIELD_ERROR; ativando fallback file.');
             dbAvailable = false;
         }
-        // fallback to file storage on SQL errors
         try {
             const msgs = await readJsonFile('messages.json');
             const filtered = (msgs || []).filter(m => (String(m.senderId) === String(userId) && String(m.receiverId) === String(contactId)) || (String(m.senderId) === String(contactId) && String(m.receiverId) === String(userId)));
             return res.json(filtered);
-        } catch (e) {
-            return res.status(500).json({ error: 'Erro interno do servidor' });
-        }
->>>>>>> 29de3da (ta indo)
-    } finally {
-        if (connection) try { connection.release(); } catch (e) {}
-    }
+        } catch (e) { return res.status(500).json({ error: 'Erro interno do servidor' }); }
+    } finally { if (connection) try { connection.release(); } catch (e) {} }
 });
 
 // Rota para enviar uma mensagem
 app.post('/api/messages', async (req, res) => {
-<<<<<<< HEAD
-    const { senderId, receiverId, content } = req.body;
-    if (!senderId || !receiverId || !content) {
-        return res.status(400).json({ error: 'Dados da mensagem incompletos.' });
-=======
     let { senderId, receiverId, content } = req.body || {};
-    console.log('[POST /api/messages] body:', req.body);
-
-    // Compatibilidade: em alguns fluxos o frontend envia um objeto 'content' vindo do Firebase.
     if (!senderId || !receiverId || content === undefined || content === null) {
         return res.status(400).json({ error: 'Dados da mensagem incompletos. senderId, receiverId e content são necessários.' });
     }
-
-    // Se content for objeto (ex: Firebase timestamp ou estrutura), stringify para armazenar no SQL
-    if (typeof content === 'object') {
-        try {
-            content = JSON.stringify(content);
-        } catch (e) {
-            content = String(content);
-        }
-    }
-
-    // Garantir ids numéricos quando possível
+    if (typeof content === 'object') { try { content = JSON.stringify(content); } catch { content = String(content); } }
     const sId = Number(senderId);
     const rId = Number(receiverId);
-
-    // If DB not available, write to file-backed messages storage
     if (!dbAvailable) {
         try {
             const msgs = await readJsonFile('messages.json');
@@ -682,77 +710,66 @@ app.post('/api/messages', async (req, res) => {
             const newMessage = { id, senderId: isNaN(sId) ? senderId : sId, receiverId: isNaN(rId) ? receiverId : rId, content, createdAt: new Date().toISOString() };
             msgs.push(newMessage);
             await writeJsonFile('messages.json', msgs);
+            // também tenta persistir no Firebase (best-effort)
+            try {
+                if (firebaseDb) {
+                    await firebaseDb.collection('messages').doc(String(newMessage.id)).set(newMessage);
+                }
+            } catch (fbErr) {
+                console.warn('Falha ao salvar mensagem no Firebase (fallback mode):', fbErr && fbErr.message ? fbErr.message : fbErr);
+            }
             return res.status(201).json(newMessage);
         } catch (e) {
-            console.error('Erro ao gravar mensagem no fallback (file):', e && e.stack ? e.stack : e);
+            console.error('Erro ao gravar mensagem fallback:', e);
             return res.status(500).json({ error: 'Erro interno ao gravar mensagem (fallback)', details: e && e.message ? e.message : String(e) });
         }
->>>>>>> 29de3da (ta indo)
     }
 
     let connection;
     try {
         connection = await getDbConnection();
         const [result] = await connection.execute(
-<<<<<<< HEAD
-            'INSERT INTO mensagem (id_remetente, id_destinatario, conteudo, data_envio) VALUES (?, ?, ?, NOW())',
-            [senderId, receiverId, content]
+          'INSERT INTO mensagem (id_remetente, id_destinatario, conteudo, data_envio) VALUES (?, ?, ?, NOW())',
+          [isNaN(sId) ? senderId : sId, isNaN(rId) ? receiverId : rId, content]
         );
-        
-        const newMessage = {
-            id: result.insertId,
-            senderId,
-            receiverId,
-=======
-            'INSERT INTO mensagem (id_remetente, id_destinatario, mensagem, data_envio) VALUES (?, ?, ?, NOW())',
-            [isNaN(sId) ? senderId : sId, isNaN(rId) ? receiverId : rId, content]
-        );
-
-        const newMessage = {
-            id: result.insertId,
-            senderId: isNaN(sId) ? senderId : sId,
-            receiverId: isNaN(rId) ? receiverId : rId,
->>>>>>> 29de3da (ta indo)
-            content,
-            createdAt: new Date().toISOString()
-        };
-        res.status(201).json(newMessage);
+                const newMessage = { id: result.insertId, senderId: isNaN(sId) ? senderId : sId, receiverId: isNaN(rId) ? receiverId : rId, content, createdAt: new Date().toISOString() };
+                // persistência espeelho no Firebase (best-effort)
+                try {
+                    if (firebaseDb) {
+                        await firebaseDb.collection('messages').doc(String(newMessage.id)).set(newMessage);
+                    }
+                } catch (fbErr) {
+                    console.warn('Falha ao salvar mensagem no Firebase (DB mode):', fbErr && fbErr.message ? fbErr.message : fbErr);
+                }
+                res.status(201).json(newMessage);
     } catch (error) {
-<<<<<<< HEAD
-        console.error('Erro ao enviar mensagem:', error);
-        res.status(500).json({ error: 'Erro interno do servidor' });
-=======
         console.error('Erro ao enviar mensagem:', error && error.stack ? error.stack : error);
         if (error && error.code === 'ER_BAD_FIELD_ERROR') {
-            console.warn('[DB] Detected ER_BAD_FIELD_ERROR on INSERT (possible schema mismatch). Switching to file fallback mode.');
-            dbAvailable = false;
+          console.warn('[DB] ER_BAD_FIELD_ERROR insert; ativando fallback.');
+          dbAvailable = false;
         }
-        // Fallback: persist message to file storage and return success so frontend can continue
         try {
-            const msgs = await readJsonFile('messages.json');
-            const id = generateId();
-            const fallbackMessage = { id, senderId: isNaN(sId) ? senderId : sId, receiverId: isNaN(rId) ? receiverId : rId, content, createdAt: new Date().toISOString() };
-            msgs.push(fallbackMessage);
-            try {
-                await writeJsonFile('messages.json', msgs);
-                console.info('[POST /api/messages] mensagem salva no fallback (file) com id=', id);
-                return res.status(201).json(fallbackMessage);
-            } catch (writeErr) {
-                console.error('Erro ao salvar fallback de mensagem:', writeErr && writeErr.stack ? writeErr.stack : writeErr);
-                return res.status(500).json({ error: 'Erro interno ao salvar mensagem (fallback)', details: writeErr && writeErr.message ? writeErr.message : String(writeErr) });
-            }
+          const msgs = await readJsonFile('messages.json');
+          const id = generateId();
+          const fallbackMessage = { id, senderId: isNaN(sId) ? senderId : sId, receiverId: isNaN(rId) ? receiverId : rId, content, createdAt: new Date().toISOString() };
+          msgs.push(fallbackMessage);
+                    await writeJsonFile('messages.json', msgs);
+                    try {
+                        if (firebaseDb) {
+                            await firebaseDb.collection('messages').doc(String(fallbackMessage.id)).set(fallbackMessage);
+                        }
+                    } catch (fbErr) {
+                        console.warn('Falha ao salvar mensagem no Firebase (on error fallback):', fbErr && fbErr.message ? fbErr.message : fbErr);
+                    }
+                    return res.status(201).json(fallbackMessage);
         } catch (e) {
-            console.error('Erro ao preparar fallback de mensagem:', e && e.stack ? e.stack : e);
-            return res.status(500).json({ error: 'Erro interno do servidor', details: error && error.message ? error.message : String(error) });
+          return res.status(500).json({ error: 'Erro interno ao salvar mensagem (fallback)', details: e && e.message ? e.message : String(e) });
         }
->>>>>>> 29de3da (ta indo)
     } finally {
         if (connection) try { connection.release(); } catch (e) {}
     }
 });
 
-<<<<<<< HEAD
-=======
 // === Simple JSON file storage fallback (dev) ===
 const fs = require('fs').promises;
 const DATA_DIR = path.resolve(__dirname, 'data');
@@ -780,9 +797,7 @@ async function writeJsonFile(name, data) {
     await fs.writeFile(p, JSON.stringify(data, null, 2), 'utf8');
 }
 
-function generateId() {
-    return Date.now() + Math.floor(Math.random() * 10000);
-}
+function generateId() { return Date.now() + Math.floor(Math.random() * 10000); }
 
 // --- Jobs endpoints (file-backed for dev) ---
 app.get('/api/jobs', async (req, res) => {
@@ -1122,15 +1137,21 @@ app.get('/api/reviews/stats', async (req, res) => {
         res.status(500).json({ error: 'Erro interno' });
     }
 });
-
-
->>>>>>> 29de3da (ta indo)
+ 
 // Inicialização do servidor
 const PORT = process.env.PORT || 3000;
 
 // Função para iniciar o servidor
 async function startServer() {
     try {
+        // 1. Verifica Firebase antes de qualquer coisa
+        const firebaseOk = await testFirebase();
+        if (!firebaseOk) {
+            console.error('❌ Firebase não disponível. Abortando inicialização do servidor.');
+            process.exit(1);
+        } else {
+            console.log('✅ Firebase verificado com sucesso. Prosseguindo.');
+        }
         // Garantir diretório e arquivos de dados para fallback (evita erros de I/O quando SQL falha)
         try {
             await ensureDataDir();
