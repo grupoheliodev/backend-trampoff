@@ -1,113 +1,52 @@
 [
   {
-    "id": 1763521419196,
-    "name": "Teste Freelancer",
-    "email": "test.freelancer+1@example.com",
-    "phone": "(11) 99999-9999",
-    "userType": "freelancer",
-    "createdAt": "2025-11-19T03:03:30.743Z"
-  },
-  {
-    "id": 1763521472004,
-    "name": "Representante Teste",
-    "email": "test.employer+2@example.com",
-    "phone": "(11) 98888-8888",
-    "userType": "contratante",
-    "createdAt": "2025-11-19T03:04:29.139Z"
-  },
-  {
-    "id": 1763522774408,
-    "name": "UI Test",
-    "email": "ui.test+1@example.com",
-    "phone": "(11) 99999-9999",
-    "userType": "freelancer",
-    "createdAt": "2025-11-19T03:26:07.024Z"
-  },
-  {
-    "id": 17,
-    "name": "Jorge Augusto",
-    "email": "asa@asa.aq",
-    "phone": "(11) 1111-1111",
-    "userType": "freelancer",
-    "createdAt": "2025-11-19T03:57:54.136Z"
-  },
-  {
-    "id": 18,
+    "id": 27,
     "name": "Empresa 1",
-    "email": "empresa1@sam.com",
-    "phone": "(11) 1111-1111",
+    "email": "teste@teste.co",
+    "phone": "(13) 13112-3213",
     "userType": "contratante",
-    "createdAt": "2025-11-19T04:03:56.744Z"
+    "createdAt": "2025-12-01T02:30:03.485Z",
+    "languages": [
+      "Python"
+    ],
+    "skills": [
+      "React"
+    ],
+    "title": "as",
+    "bio": "as"
   },
   {
-    "id": 19,
-    "name": "Eric de Souza",
-    "email": "eric@gmail.com",
-    "phone": "(11) 1111-1111",
-    "userType": "freelancer",
-    "createdAt": "2025-11-19T10:46:59.175Z"
-  },
-  {
-    "id": 20,
-    "name": "Empresa Corp 2",
-    "email": "empresa1@corp.com",
-    "phone": "(11) 11111-1111",
-    "userType": "contratante",
-    "createdAt": "2025-11-19T10:49:18.767Z"
-  },
-  {
-    "id": 21,
-    "name": "Empresa de Teste 1",
-    "email": "teste@teste.com",
-    "phone": "(01) 0101-0101",
-    "userType": "contratante",
-    "createdAt": "2025-11-19T10:54:36.422Z"
-  },
-  {
-    "id": 22,
-    "name": "Usuario Teste",
-    "email": "teste@user.com",
-    "phone": "(10) 1010-1010",
-    "userType": "freelancer",
-    "createdAt": "2025-11-19T10:57:18.416Z"
-  },
-  {
-    "id": 23,
-    "name": "Eduardo suzuki",
-    "email": "eduardo@gmail.com",
-    "phone": "(11) 93767-2220",
-    "userType": "freelancer",
-    "createdAt": "2025-11-19T11:20:59.688Z"
-  },
-  {
-    "id": 24,
-    "name": "Empresa Corp",
-    "email": "luis4335@email.com",
-    "phone": "(11) 1111-1111",
-    "userType": "contratante",
-    "createdAt": "2025-11-19T11:24:31.516Z"
-<<<<<<< HEAD
-=======
-  },
-  {
-    "id": 25,
-    "name": "teste",
-    "email": "teste@teste.teste",
+    "id": 1764589272701,
+    "name": "Teste",
+    "email": "usuario@teste.co",
     "phone": "(11) 11111-1111",
     "userType": "freelancer",
-    "createdAt": "2025-12-01T00:34:02.291Z"
+    "createdAt": "2025-12-01T11:41:09.017Z",
+    "languages": [
+      "teste",
+      "Python"
+    ],
+    "skills": [
+      "React"
+    ],
+    "title": "Teste",
+    "bio": "Dev Teste"
   },
   {
-    "id": 26,
-    "name": "teste",
-    "email": "teste@teste.test",
-    "phone": "(11) 11111-1111",
+    "id": 3,
+    "name": "user",
+    "email": "user@uer.test",
+    "phone": "(11) 24123-4123",
     "userType": "freelancer",
-    "createdAt": "2025-12-01T01:16:09.506Z",
-    "languages": [],
-    "skills": [],
-    "title": "",
-    "bio": ""
->>>>>>> ccf2f66 (ot)
+    "createdAt": "2025-12-01T12:15:25.375Z",
+    "languages": [
+      "Python"
+    ],
+    "skills": [
+      "React",
+      "Node"
+    ],
+    "title": "Dev Teste",
+    "bio": "Teste 1"
   }
 ]

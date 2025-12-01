@@ -2,24 +2,22 @@ services:
   - type: web
     name: backend-trampoff
     env: node
-    region: oregon
     plan: free
-    branch: main
-    buildCommand: npm install
-    startCommand: npm start
+    buildCommand: "npm install"
+    startCommand: "node server.js"
     autoDeploy: true
-    # As variáveis sensíveis devem ser definidas no Dashboard do Render (ou via Secrets/Environment).
-    # Deixo as chaves listadas como referência — preencha os valores no painel do Render antes de deploy.
     envVars:
       - key: DB_HOST
-        value: ""
+        sync: false
       - key: DB_PORT
-        value: ""
+        sync: false
       - key: DB_USER
-        value: ""
+        sync: false
       - key: DB_PASSWORD
-        value: ""
+        sync: false
       - key: DB_DATABASE
-        value: ""
+        sync: false
+      - key: SKIP_FIREBASE_CHECK
+        sync: false
       - key: NODE_ENV
         value: production

@@ -70,6 +70,78 @@ app.use(cors({
     credentials: true
 }));
 app.use(express.json());
+app.post('/api/email/resend-confirmation', async (req, res) => {
+    try {
+        const { email } = req.body || {};
+        if (!email) return res.status(400).json({ error: 'E-mail é obrigatório' });
+        const code = String(Math.floor(100000 + Math.random() * 900000));
+        const key = 'email_confirmations.json';
+        let arr = [];
+        try { arr = await readJson(key); } catch (_) { arr = []; }
+        const lower = String(email).toLowerCase();
+        const idx = arr.findIndex(c => c.email === lower);
+        const record = { email: lower, code, confirmed: false, createdAt: new Date().toISOString() };
+        if (idx !== -1) arr[idx] = record; else arr.push(record);
+        await writeJson(key, arr);
+        return res.json({ code });
+    } catch (e) {
+        console.error('Erro em POST /api/email/resend-confirmation', e);
+        return res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+app.post('/api/email/confirm', async (req, res) => {
+    try {
+        const { email, code } = req.body || {};
+        if (!email || !code) return res.status(400).json({ error: 'E-mail e código são obrigatórios' });
+        const key = 'email_confirmations.json';
+        let arr = [];
+        try { arr = await readJson(key); } catch (_) { arr = []; }
+        const lower = String(email).toLowerCase();
+        const idx = arr.findIndex(c => c.email === lower);
+        if (idx === -1) return res.status(404).json({ error: 'Nenhum código para este e-mail' });
+        if (String(arr[idx].code) !== String(code).trim()) return res.status(400).json({ error: 'Código inválido' });
+        arr[idx].confirmed = true;
+        await writeJson(key, arr);
+        // opcional: marcar usuário como verificado
+        try {
+            const [rows] = await pool.query('UPDATE users SET emailVerified = 1 WHERE LOWER(email) = LOWER(?)', [lower]);
+        } catch (_) {}
+        return res.json({ success: true });
+    } catch (e) {
+        console.error('Erro em POST /api/email/confirm', e);
+        return res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+// Reset password
+app.post('/api/reset-password', async (req, res) => {
+    try {
+        const { email, newPassword } = req.body || {};
+        if (!email || !newPassword) return res.status(400).json({ error: 'E-mail e nova senha são obrigatórios' });
+        // tentar via DB
+        let changed = false;
+        try {
+            const [rows] = await pool.query('UPDATE users SET password = ? WHERE LOWER(email) = LOWER(?)', [newPassword, email]);
+            changed = rows && rows.affectedRows > 0;
+        } catch (_) {}
+        // fallback local
+        if (!changed) {
+            const key = 'users.json';
+            let users = [];
+            try { users = await readJson(key); } catch (_) { users = []; }
+            const lower = String(email).toLowerCase();
+            const idx = users.findIndex(u => String(u.email || '').toLowerCase() === lower);
+            if (idx === -1) return res.status(404).json({ error: 'E-mail não encontrado' });
+            users[idx].password = newPassword;
+            await writeJson(key, users);
+        }
+        return res.json({ success: true });
+    } catch (e) {
+        console.error('Erro em POST /api/reset-password', e);
+        return res.status(500).json({ error: 'Erro interno' });
+    }
+});
 
 // Middleware para logar todas as requisições
 app.use((req, res, next) => {
@@ -86,16 +158,22 @@ const dbConfig = {
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
     database: process.env.DB_DATABASE,
-    waitForConnections: true,
-    connectionLimit: 5,
-    queueLimit: 0,
-    connectTimeout: 10000,
+    // Desativa SSL completamente
+    ssl: false,
     enableKeepAlive: true,
-    keepAliveInitialDelay: 0
-}
+    connectTimeout: 15000,
+    // Força resolução IPv4 para evitar problemas com IPv6
+    dnsLookup: (hostname, options, callback) => {
+        require('dns').lookup(hostname, { family: 4 }, callback);
+    },
+    waitForConnections: true,
+    connectionLimit: 2,
+    queueLimit: 0
+};
 
 const saltRounds = 10 //Define a "complexidade" da criptografia da senha.
 const JWT_SECRET = 'IvyLindaMeuAmor'// Chave secreta para assinar os tokens JWT. Mude isso para algo aleatório e seguro.
+const RECONNECT_INTERVAL_MS = parseInt(process.env.DB_RECONNECT_INTERVAL_MS || '60000', 10);
 
 
 // --- 4. Função Auxiliar para Conexão ---
@@ -173,8 +251,6 @@ app.get('/api/status', async (req, res) => {
     }
 });
 
-<<<<<<< HEAD
-=======
 // Lista usuários por tipo (contratante ou freelancer)
 app.get('/api/users/:tipo', async (req, res) => {
     try {
@@ -232,7 +308,6 @@ app.put('/api/users/:id', async (req, res) => {
         res.status(500).json({ error: 'Erro interno' });
     }
 });
->>>>>>> ccf2f66 (ot)
 // Busca unificada: usuários, jobs, projects e mensagens (file/DB + Firebase best-effort)
 app.get('/api/search', async (req, res) => {
     try {
@@ -1204,17 +1279,8 @@ const PORT = process.env.PORT || 3000;
 // Função para iniciar o servidor
 async function startServer() {
     try {
-<<<<<<< HEAD
-        // 1. Verifica Firebase antes de qualquer coisa
-        const firebaseOk = await testFirebase();
-        if (!firebaseOk) {
-            console.error('❌ Firebase não disponível. Abortando inicialização do servidor.');
-            process.exit(1);
-        } else {
-            console.log('✅ Firebase verificado com sucesso. Prosseguindo.');
-=======
         // 1. Verifica Firebase antes de qualquer coisa (pode ser pulado em dev)
-        const skipFb = String(process.env.SKIP_FIREBASE_CHECK || '').toLowerCase() === 'true';
+        const skipFb = String(process.env.SKIP_FIREBASE_CHECK || '').toLowerCase() === 'true' || process.env.SKIP_FIREBASE_CHECK === '1';
         if (!skipFb) {
             const firebaseOk = await testFirebase();
             if (!firebaseOk) {
@@ -1225,7 +1291,6 @@ async function startServer() {
             }
         } else {
             console.warn('[startup] SKIP_FIREBASE_CHECK=true — pulando verificação do Firebase (uso apenas em desenvolvimento).');
->>>>>>> ccf2f66 (ot)
         }
         // Garantir diretório e arquivos de dados para fallback (evita erros de I/O quando SQL falha)
         try {
@@ -1259,6 +1324,21 @@ async function startServer() {
             console.log('   POST /api/register/contratante - Registrar contratante');
             console.log('   POST /api/login - Login de usuário');
             console.log('   GET /api/status - Status do servidor');
+            // Tentativa de reconexão automática ao DB quando iniciado em modo fallback
+            if (!dbAvailable && RECONNECT_INTERVAL_MS > 0) {
+                setInterval(async () => {
+                    try {
+                        const ok = await testConnection();
+                        if (ok) {
+                            dbAvailable = true;
+                            console.log('[db] conexão restabelecida; saindo do modo fallback.');
+                        }
+                    } catch (_) {
+                        // mantém fallback
+                    }
+                }, RECONNECT_INTERVAL_MS);
+                console.log(`[db] modo fallback ativo; tentará reconectar a cada ${RECONNECT_INTERVAL_MS}ms.`);
+            }
         });
     } catch (error) {
         console.error('Erro ao iniciar o servidor:', error);

@@ -1,9 +1,6 @@
 // firebase.js
 const admin = require('firebase-admin');
-<<<<<<< HEAD
-=======
 const fs = require('fs');
->>>>>>> ccf2f66 (ot)
 
 // Metadados do projeto Firebase (fornecidos pelo usuário)
 // Nome: trampoff
@@ -15,22 +12,6 @@ const PROJECT_META = {
   projectNumber: '268221991123'
 };
 
-// !!! AÇÃO NECESSÁRIA !!!
-// 1. Baixe o arquivo de chave de serviço da sua conta do Firebase:
-//    - Vá para o Console do Firebase -> Configurações do projeto -> Contas de serviço.
-//    - Clique em "Gerar nova chave privada" e baixe o arquivo JSON.
-// 2. Renomeie o arquivo para "serviceAccountKey.json".
-// 3. Coloque o arquivo "serviceAccountKey.json" na raiz do seu projeto backend (`backend-trampoff`).
-// 4. Certifique-se de que este arquivo NÃO seja enviado para o seu repositório Git, adicionando-o ao .gitignore.
-
-<<<<<<< HEAD
-try {
-  const serviceAccount = require('./serviceAccountKey.json');
-
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-    projectId: PROJECT_META.projectId
-=======
 function loadServiceAccountFromEnv() {
   const projectId = process.env.FIREBASE_PROJECT_ID || PROJECT_META.projectId;
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
@@ -80,7 +61,6 @@ try {
       privateKey: serviceAccount.private_key
     }),
     projectId: serviceAccount.project_id || PROJECT_META.projectId
->>>>>>> ccf2f66 (ot)
   });
 
   const db = admin.firestore();
@@ -89,14 +69,7 @@ try {
   module.exports = { db, PROJECT_META };
 } catch (error) {
   console.error('\x1b[31m%s\x1b[0m', '✗ Erro ao inicializar o Firebase Admin SDK:');
-<<<<<<< HEAD
-  console.error('  - Certifique-se de que o arquivo "serviceAccountKey.json" existe na raiz do projeto backend.');
-  console.error('  - Detalhes do erro:', error.message);
-  // Se o SDK não inicializar, exportamos um objeto `db` mock para evitar que a aplicação quebre.
-  // As operações do Firestore irão falhar.
-=======
   console.error('  - Forneça credenciais via arquivo serviceAccountKey.json, GOOGLE_APPLICATION_CREDENTIALS/FIREBASE_CREDENTIALS_PATH, ou variáveis FIREBASE_PROJECT_ID/FIREBASE_CLIENT_EMAIL/FIREBASE_PRIVATE_KEY.');
   console.error('  - Detalhes do erro:', error.message);
->>>>>>> ccf2f66 (ot)
   module.exports = { db: null, PROJECT_META };
 }
