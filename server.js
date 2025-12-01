@@ -173,6 +173,66 @@ app.get('/api/status', async (req, res) => {
     }
 });
 
+<<<<<<< HEAD
+=======
+// Lista usuários por tipo (contratante ou freelancer)
+app.get('/api/users/:tipo', async (req, res) => {
+    try {
+        const tipo = String(req.params.tipo).toLowerCase();
+        const users = await readJsonFile('users.json');
+        const mappedType = tipo.includes('contrat') ? 'contratante' : (tipo.includes('free') ? 'freelancer' : tipo);
+        const filtered = users.filter(u => String(u.userType).toLowerCase() === mappedType);
+        res.json(filtered.map(u => ({ ...u, password: undefined })));
+    } catch (e) {
+        console.error('Erro em GET /api/users/:tipo', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+// Social login (mock dev)
+app.post('/api/social-login', async (req, res) => {
+    try {
+        const { provider, token } = req.body || {};
+        if (!provider) return res.status(400).json({ error: 'provider é obrigatório' });
+        const users = await readJsonFile('users.json');
+        let user = users.find(u => u.email && String(u.email).startsWith(`social_${provider}@`));
+        if (!user) {
+            user = { id: generateId(), name: `Usuário ${provider}`, email: `social_${provider}@example.com`, userType: 'freelancer', createdAt: new Date().toISOString() };
+            users.push(user);
+            await writeJsonFile('users.json', users);
+            try { if (firebaseDb) await firebaseDb.collection('users').doc(String(user.id)).set(user, { merge: true }); } catch {}
+        }
+        res.json({ user: { ...user, password: undefined }, token: 'mock-jwt' });
+    } catch (e) {
+        console.error('Erro em POST /api/social-login', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+// Atualização de perfil do usuário
+app.put('/api/users/:id', async (req, res) => {
+    try {
+        const id = String(req.params.id);
+        const { languages, skills, title, bio } = req.body || {};
+        const users = await readJsonFile('users.json');
+        const idx = users.findIndex(u => String(u.id) === id);
+        if (idx === -1) return res.status(404).json({ error: 'Usuário não encontrado' });
+        const updated = {
+            ...users[idx],
+            languages: Array.isArray(languages) ? languages : users[idx].languages || [],
+            skills: Array.isArray(skills) ? skills : users[idx].skills || [],
+            title: title !== undefined ? title : users[idx].title || '',
+            bio: bio !== undefined ? bio : users[idx].bio || ''
+        };
+        users[idx] = updated;
+        await writeJsonFile('users.json', users);
+        try { if (firebaseDb) await firebaseDb.collection('users').doc(id).set(updated, { merge: true }); } catch (e) {}
+        res.json(updated);
+    } catch (e) {
+        console.error('Erro em PUT /api/users/:id', e);
+        res.status(500).json({ error: 'Erro interno' });
+    }
+});
+>>>>>>> ccf2f66 (ot)
 // Busca unificada: usuários, jobs, projects e mensagens (file/DB + Firebase best-effort)
 app.get('/api/search', async (req, res) => {
     try {
@@ -1144,6 +1204,7 @@ const PORT = process.env.PORT || 3000;
 // Função para iniciar o servidor
 async function startServer() {
     try {
+<<<<<<< HEAD
         // 1. Verifica Firebase antes de qualquer coisa
         const firebaseOk = await testFirebase();
         if (!firebaseOk) {
@@ -1151,6 +1212,20 @@ async function startServer() {
             process.exit(1);
         } else {
             console.log('✅ Firebase verificado com sucesso. Prosseguindo.');
+=======
+        // 1. Verifica Firebase antes de qualquer coisa (pode ser pulado em dev)
+        const skipFb = String(process.env.SKIP_FIREBASE_CHECK || '').toLowerCase() === 'true';
+        if (!skipFb) {
+            const firebaseOk = await testFirebase();
+            if (!firebaseOk) {
+                console.error('❌ Firebase não disponível. Abortando inicialização do servidor. (Defina SKIP_FIREBASE_CHECK=true para pular em dev)');
+                process.exit(1);
+            } else {
+                console.log('✅ Firebase verificado com sucesso. Prosseguindo.');
+            }
+        } else {
+            console.warn('[startup] SKIP_FIREBASE_CHECK=true — pulando verificação do Firebase (uso apenas em desenvolvimento).');
+>>>>>>> ccf2f66 (ot)
         }
         // Garantir diretório e arquivos de dados para fallback (evita erros de I/O quando SQL falha)
         try {

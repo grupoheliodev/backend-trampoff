@@ -27,3 +27,7 @@ Se preferir usar Docker, posso adicionar um `Dockerfile` e atualizar o `render.y
 ---
 
 Se quiser, eu já posso: criar um `Dockerfile`, adicionar secrets via GitHub Actions, ou gerar o `render.yaml` com variáveis preenchidas (se você me informar os valores ou fornecer secrets).
+<<<<<<< HEAD
+=======
+# backend
+>>>>>>> ccf2f66 (ot)
