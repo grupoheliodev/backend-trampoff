@@ -13,8 +13,25 @@
   Objetivo: servir endpoints REST para o frontend e comunicar com o banco MySQL.
 */
 const path = require('path');
-// 1) Carrega variáveis de ambiente do arquivo .env localizado na pasta do backend
-require('dotenv').config({ path: path.resolve(__dirname, '.env') });
+const fsSync = require('fs');
+// 1) Carrega variáveis de ambiente conforme NODE_ENV, priorizando .env.development em dev
+(() => {
+    const envFromNode = process.env.NODE_ENV;
+    const candidates = envFromNode && envFromNode.length
+        ? [`.env.${envFromNode}`, '.env']
+        : ['.env.development', '.env'];
+    const envPath = candidates
+        .map((f) => path.resolve(__dirname, f))
+        .find((p) => {
+            try { return fsSync.existsSync(p); } catch (_) { return false; }
+        });
+    require('dotenv').config({ path: envPath });
+    if (envPath) {
+        console.log(`[env] carregado: ${path.basename(envPath)} (NODE_ENV=${envFromNode || 'undefined'})`);
+    } else {
+        console.warn('[env] nenhum arquivo .env* encontrado; usando apenas variáveis do processo.');
+    }
+})();
 
 // Verifica se as variáveis de ambiente essenciais estão definidas
 // Permitir ignorar a verificação em desenvolvimento definindo SKIP_DB_TEST=true
@@ -65,8 +82,23 @@ const { db: firebaseDb } = require('./firebase');
 
 // 2.1) Inicializa o app Express, habilita CORS e JSON parsing
 const app = express();
+// CORS dinâmico para permitir Vercel e localhost; pode ser sobrescrito via CORS_ORIGINS
+const defaultOrigins = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'https://trampoff.vercel.app'
+];
+const allowedOrigins = (process.env.CORS_ORIGINS || defaultOrigins.join(',')).split(',').map(s => s.trim()).filter(Boolean);
 app.use(cors({
-    origin: 'http://localhost:5173', // origem do frontend Vite
+    origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.includes(origin)) return callback(null, true);
+        try {
+            const url = new URL(origin);
+            if (url.hostname.endsWith('.vercel.app')) return callback(null, true);
+        } catch (_) {}
+        return callback(new Error(`Not allowed by CORS: ${origin}`));
+    },
     credentials: true
 }));
 app.use(express.json());
@@ -162,10 +194,6 @@ const dbConfig = {
     ssl: false,
     enableKeepAlive: true,
     connectTimeout: 15000,
-    // Força resolução IPv4 para evitar problemas com IPv6
-    dnsLookup: (hostname, options, callback) => {
-        require('dns').lookup(hostname, { family: 4 }, callback);
-    },
     waitForConnections: true,
     connectionLimit: 2,
     queueLimit: 0
