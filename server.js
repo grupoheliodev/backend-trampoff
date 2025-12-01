@@ -109,12 +109,12 @@ app.post('/api/email/resend-confirmation', async (req, res) => {
         const code = String(Math.floor(100000 + Math.random() * 900000));
         const key = 'email_confirmations.json';
         let arr = [];
-        try { arr = await readJson(key); } catch (_) { arr = []; }
+        try { arr = await readJsonFile(key); } catch (_) { arr = []; }
         const lower = String(email).toLowerCase();
         const idx = arr.findIndex(c => c.email === lower);
         const record = { email: lower, code, confirmed: false, createdAt: new Date().toISOString() };
         if (idx !== -1) arr[idx] = record; else arr.push(record);
-        await writeJson(key, arr);
+        await writeJsonFile(key, arr);
         return res.json({ code });
     } catch (e) {
         console.error('Erro em POST /api/email/resend-confirmation', e);
@@ -128,13 +128,13 @@ app.post('/api/email/confirm', async (req, res) => {
         if (!email || !code) return res.status(400).json({ error: 'E-mail e código são obrigatórios' });
         const key = 'email_confirmations.json';
         let arr = [];
-        try { arr = await readJson(key); } catch (_) { arr = []; }
+        try { arr = await readJsonFile(key); } catch (_) { arr = []; }
         const lower = String(email).toLowerCase();
         const idx = arr.findIndex(c => c.email === lower);
         if (idx === -1) return res.status(404).json({ error: 'Nenhum código para este e-mail' });
         if (String(arr[idx].code) !== String(code).trim()) return res.status(400).json({ error: 'Código inválido' });
         arr[idx].confirmed = true;
-        await writeJson(key, arr);
+        await writeJsonFile(key, arr);
         // opcional: marcar usuário como verificado
         try {
             const [rows] = await pool.query('UPDATE users SET emailVerified = 1 WHERE LOWER(email) = LOWER(?)', [lower]);
@@ -161,12 +161,12 @@ app.post('/api/reset-password', async (req, res) => {
         if (!changed) {
             const key = 'users.json';
             let users = [];
-            try { users = await readJson(key); } catch (_) { users = []; }
+            try { users = await readJsonFile(key); } catch (_) { users = []; }
             const lower = String(email).toLowerCase();
             const idx = users.findIndex(u => String(u.email || '').toLowerCase() === lower);
             if (idx === -1) return res.status(404).json({ error: 'E-mail não encontrado' });
             users[idx].password = newPassword;
-            await writeJson(key, users);
+            await writeJsonFile(key, users);
         }
         return res.json({ success: true });
     } catch (e) {
