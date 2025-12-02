@@ -41,5 +41,13 @@
     "coverLetter": "Buscar expericencia",
     "status": "pending",
     "createdAt": "2025-11-19T11:21:53.206Z"
+  },
+  {
+    "id": 1764642804891,
+    "jobId": "1763473014121",
+    "userId": 9,
+    "coverLetter": "",
+    "status": "pending",
+    "createdAt": "2025-12-02T02:33:20.833Z"
   }
 ]

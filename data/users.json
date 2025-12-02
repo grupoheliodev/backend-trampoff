@@ -48,5 +48,150 @@
     ],
     "title": "Dev Teste",
     "bio": "Teste 1"
+  },
+  {
+    "id": 9,
+    "name": "Teste",
+    "email": "teste@gmail.com",
+    "phone": "(11) 11111-1111",
+    "userType": "freelancer",
+    "createdAt": "2025-12-02T02:29:42.006Z",
+    "languages": [
+      "JavaScript"
+    ],
+    "skills": [
+      "React"
+    ],
+    "title": "Dev Ful stack",
+    "bio": "Dev",
+    "password": "123123"
+  },
+  {
+    "id": 1764642934862,
+    "name": "Empresa Teste",
+    "email": "teste@empre.sa",
+    "phone": "(12) 31241-2414",
+    "userType": "contratante",
+    "createdAt": "2025-12-02T02:35:30.003Z",
+    "password": "123123"
+  },
+  {
+    "id": 1764642991264,
+    "name": "Empresa Teste",
+    "email": "vulguph@proton.me",
+    "phone": "(13) 12323-1231",
+    "userType": "contratante",
+    "createdAt": "2025-12-02T02:36:26.630Z"
+  },
+  {
+    "id": 1764643675002,
+    "name": "Empresa Teste",
+    "email": "vulguph@proton.me",
+    "phone": "(11) 11111-1111",
+    "userType": "contratante",
+    "createdAt": "2025-12-02T02:47:46.619Z"
+  },
+  {
+    "id": 1764645041880,
+    "name": "Empresa Teste",
+    "email": "teste@empre.sa",
+    "phone": "(11) 11111-1111",
+    "userType": "contratante",
+    "createdAt": "2025-12-02T03:10:40.400Z"
+  },
+  {
+    "id": 1764645263940,
+    "name": "Empresa Teste 2",
+    "email": "empresa_teste2@example.com",
+    "phone": "(11) 22222-2222",
+    "userType": "contratante",
+    "createdAt": "2025-12-02T03:14:20.287Z"
+  },
+  {
+    "id": 1764645279297,
+    "name": "Empresa Teste 2",
+    "email": "empresa_teste2@example.com",
+    "phone": "(11) 22222-2222",
+    "userType": "contratante",
+    "createdAt": "2025-12-02T03:14:36.017Z"
+  },
+  {
+    "id": 1764645806701,
+    "name": "Empresa Teste",
+    "email": "Empresa_teste_1@gmail.com",
+    "phone": "(11) 11111-1111",
+    "userType": "contratante",
+    "createdAt": "2025-12-02T03:23:24.751Z"
+  },
+  {
+    "id": 1764646467474,
+    "name": "Empresa Teste",
+    "email": "teste@empre.sa",
+    "phone": "(11) 11111-1111",
+    "userType": "contratante",
+    "createdAt": "2025-12-02T03:34:21.343Z"
+  },
+  {
+    "id": 1764646697907,
+    "name": "Empresa Teste",
+    "email": "teste@empre.sa",
+    "phone": "(13) 12323-1231",
+    "userType": "contratante",
+    "createdAt": "2025-12-02T03:38:10.175Z"
+  },
+  {
+    "id": 1764646698279,
+    "name": "Empresa Teste",
+    "email": "teste@empre.sa",
+    "phone": "(13) 12323-1231",
+    "userType": "contratante",
+    "createdAt": "2025-12-02T03:38:16.494Z"
+  },
+  {
+    "id": 1764646700434,
+    "name": "Empresa Teste",
+    "email": "teste@empre.sa",
+    "phone": "(13) 12323-1231",
+    "userType": "contratante",
+    "createdAt": "2025-12-02T03:38:17.358Z"
+  },
+  {
+    "id": 1764646700726,
+    "name": "Empresa Teste",
+    "email": "teste@empre.sa",
+    "phone": "(13) 12323-1231",
+    "userType": "contratante",
+    "createdAt": "2025-12-02T03:38:17.924Z"
+  },
+  {
+    "id": 1764646702192,
+    "name": "Empresa Teste",
+    "email": "teste@empre.sa",
+    "phone": "(13) 12323-1231",
+    "userType": "contratante",
+    "createdAt": "2025-12-02T03:38:18.652Z"
+  },
+  {
+    "id": 1764646706109,
+    "name": "Empresa Teste",
+    "email": "teste@empre.sa",
+    "phone": "(13) 12323-1231",
+    "userType": "contratante",
+    "createdAt": "2025-12-02T03:38:19.235Z"
+  },
+  {
+    "id": 1764646700097,
+    "name": "Empresa Teste",
+    "email": "teste@empre.sa",
+    "phone": "(13) 12323-1231",
+    "userType": "contratante",
+    "createdAt": "2025-12-02T03:38:19.803Z"
+  },
+  {
+    "id": 1764647445077,
+    "name": "Usuário google",
+    "email": "social_google@example.com",
+    "userType": "freelancer",
+    "createdAt": "2025-12-02T03:50:35.922Z"
   }
 ]
