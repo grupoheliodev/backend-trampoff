@@ -66,6 +66,19 @@ node server.js
 
 Variáveis de ambiente de banco podem ser omitidas para usar fallback sem MySQL.
 
+### Dependências importantes
+
+Certifique-se de instalar as dependências necessárias antes de rodar o servidor:
+
+```powershell
+cd backend-trampoff
+npm install
+npm install firebase-admin
+npm install multer uuid
+```
+
+Esses pacotes são usados para integração com Firebase Admin (`firebase-admin`), upload/tratamento de arquivos (`multer`) e geração de identificadores únicos (`uuid`).
+
 ## Próximos Passos Possíveis
 
 - Adicionar `Dockerfile` para deploy containerizado.
