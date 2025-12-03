@@ -193,5 +193,124 @@
     "email": "social_google@example.com",
     "userType": "freelancer",
     "createdAt": "2025-12-02T03:50:35.922Z"
+  },
+  {
+    "id": 20,
+    "name": "Empresa Teste",
+    "email": "teste@empre.sa",
+    "phone": "(11) 11111-1111",
+    "userType": "contratante",
+    "createdAt": "2025-12-03T01:34:06.605Z"
+  },
+  {
+    "id": 1764726240512,
+    "name": "Jorge da Capadócia",
+    "email": "jorge@email.com",
+    "phone": "(11) 11111-1111",
+    "userType": "freelancer",
+    "createdAt": "2025-12-03T01:43:52.647Z",
+    "title": "asdasd",
+    "bio": "asdadasda",
+    "languages": [
+      "asdadasd"
+    ],
+    "skills": [
+      "asdasd"
+    ],
+    "senhaHash": "$2b$04$7h15T97AEFWWVyPILGk51erIobhn7EK779E10tx0ihChnM5oBLGhG"
+  },
+  {
+    "id": 1764727808579,
+    "name": "Jorge da Capadócia",
+    "email": "jorge@email.com",
+    "phone": "(13) 12323-1231",
+    "userType": "freelancer",
+    "createdAt": "2025-12-03T02:10:00.033Z",
+    "title": "dfbd",
+    "bio": "dfdf",
+    "languages": [
+      "dfgdd"
+    ],
+    "skills": [
+      "dfgdfg"
+    ]
+  },
+  {
+    "id": 1764729118547,
+    "name": "Zoi",
+    "email": "jorge@email.com",
+    "phone": "(11) 32132-1312",
+    "userType": "freelancer",
+    "createdAt": "2025-12-03T02:31:49.900Z",
+    "title": "qwqdasda",
+    "bio": "asdadasd",
+    "languages": [
+      "dsadasda"
+    ],
+    "skills": [
+      "dasdasdas"
+    ]
+  },
+  {
+    "id": 1764729381889,
+    "name": "Zoio",
+    "email": "everton@zoio.desafio",
+    "phone": "(11) 11111-1111",
+    "userType": "freelancer",
+    "createdAt": "2025-12-03T02:36:21.883Z",
+    "title": "asas",
+    "bio": "asa",
+    "languages": [
+      "asas"
+    ],
+    "skills": [
+      "asa"
+    ]
+  },
+  {
+    "id": 1764729612807,
+    "name": "zoio eu desafio ",
+    "email": "everton@zoio.desafio",
+    "phone": "(12) 31313-2213",
+    "userType": "freelancer",
+    "createdAt": "2025-12-03T02:40:07.298Z",
+    "title": "dev",
+    "bio": "vev",
+    "languages": [
+      "veav"
+    ],
+    "skills": [
+      "aeva"
+    ]
+  },
+  {
+    "id": 21,
+    "name": "Empresa do Zoio",
+    "email": "zoio@enterprises",
+    "phone": "(12) 12121-2121",
+    "userType": "contratante",
+    "createdAt": "2025-12-03T02:41:44.892Z",
+    "photo": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSsNmRmL57VMnqTgvPqCpG6tmm-a2vby8kZ0g&s",
+    "tagline": "Empresa de Tecnologia | Inovação e Soluções",
+    "location": "São Paulo, Brasil"
+  },
+  {
+    "id": 22,
+    "name": "zoio eu desafio",
+    "email": "everton@zoio.desafio",
+    "phone": "(13) 12313-2113",
+    "userType": "freelancer",
+    "createdAt": "2025-12-03T02:46:02.093Z",
+    "title": "asdas",
+    "bio": "asdadas",
+    "languages": [
+      "asdads"
+    ],
+    "skills": [
+      "asdasda"
+    ],
+    "tagline": "Desenvolvedor Front-end | Especialista em UI/UX",
+    "location": "São Paulo, Brasil",
+    "photo": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRg7r4qbn0GG2B_8cn2uNA0iVszmh8uyw5ORIWfcB5abFU_2AYfC-hQLJjRyWMgq9H9kdfHEvGrx4hPMVkRmNttwmU0Eze9WL_4qWkJAurDhg&s=10"
   }
 ]

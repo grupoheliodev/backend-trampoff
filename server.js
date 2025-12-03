@@ -88,7 +88,9 @@ const mysql = require('mysql2/promise');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { db: firebaseDb } = require('./firebase');
+const { db: firebaseDb, storageBucket } = require('./firebase');
+const multer = require('multer');
+const { v4: uuidv4 } = require('uuid');
 
 // 2.1) Inicializa o app Express, habilita CORS e JSON parsing
 const app = express();
@@ -96,6 +98,8 @@ const app = express();
 const defaultOrigins = [
     'http://localhost:5173',
     'http://127.0.0.1:5173',
+    'http://localhost:5174',
+    'http://127.0.0.1:5174',
     'https://trampoff.vercel.app'
 ];
 const allowedOrigins = (process.env.CORS_ORIGINS || defaultOrigins.join(',')).split(',').map(s => s.trim()).filter(Boolean);
@@ -111,7 +115,8 @@ app.use(cors({
     },
     credentials: true
 }));
-app.use(express.json());
+// Aumenta limite para payloads JSON (ex.: imagens base64) e evita PayloadTooLargeError
+app.use(express.json({ limit: '10mb' }));
 // Simplificado: não exige mais código de confirmação; marca como verificado.
 app.post('/api/email/resend-confirmation', async (req, res) => {
     try {
@@ -464,13 +469,15 @@ app.post('/api/register-base', async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, saltRounds);
 
         // Insere o usuário com tipo pendente
-        const [result] = await connection.execute(
-            'INSERT INTO usuario (email, nome, senha, tipo, data_criacao) VALUES (?, ?, ?, ?, CURDATE())',
-            [email, name, hashedPassword, 'pendente']
+        let [messages] = await connection.execute(
+            `SELECT id_mensagem as id, id_remetente as senderId, id_destinatario as receiverId, conteudo as content, data_envio as createdAt
+             FROM mensagem
+             WHERE (id_remetente = ? AND id_destinatario = ?) OR (id_remetente = ? AND id_destinatario = ?)
+             ORDER BY data_envio ASC`,
+            [user1, user2, user2, user1]
         );
-
-        const userId = result.insertId;
-        await connection.commit();
+        // Caso a coluna 'conteudo' não exista neste banco, tenta com possível alternativa 'mensagem'
+        if (!messages || !Array.isArray(messages)) messages = [];
 
         // Gera token mínimo para usar na segunda etapa (pode conter apenas userId)
         const token = jwt.sign({ userId, email }, JWT_SECRET, { expiresIn: '24h' });
@@ -478,6 +485,17 @@ app.post('/api/register-base', async (req, res) => {
         return res.status(201).json({ message: 'Usuário base criado.', userId, token });
     } catch (error) {
         console.error('Erro em /api/register-base:', error.message || error);
+            // Tenta novamente com coluna alternativa 'mensagem'
+            try {
+                const [messagesAlt] = await getDbConnection().then(conn => conn.execute(
+                    `SELECT id_mensagem as id, id_remetente as senderId, id_destinatario as receiverId, mensagem as content, data_envio as createdAt
+                     FROM mensagem
+                     WHERE (id_remetente = ? AND id_destinatario = ?) OR (id_remetente = ? AND id_destinatario = ?)
+                     ORDER BY data_envio ASC`,
+                    [user1, user2, user2, user1]
+                ).finally(conn => { try { conn.release(); } catch {} }));
+                return res.json(messagesAlt);
+            } catch (_) {}
         if (connection) {
             try { await connection.rollback(); } catch (e) {}
         }
@@ -579,11 +597,8 @@ app.post('/api/register/:usertype', async (req, res) => {
         // Confirmação de senha removida: aceitar diretamente a senha enviada
         // (para restaurar, reintroduzir verificação de igualdade de campos)
 
-        // Aceita alias de telefone também, para compatibilidade com clientes antigos
-        const phoneVal = phone || req.body.phone_number || req.body.telefone || req.body.telefone_celular;
-        if (!phoneVal) {
-            return res.status(400).json({ error: 'Número de telefone é obrigatório.' });
-        }
+        // Aceita alias de telefone também, para compatibilidade com clientes antigos (opcional)
+        const phoneVal = phone || req.body.phone_number || req.body.telefone || req.body.telefone_celular || null;
 
         if (userType !== 'freelancer' && userType !== 'contratante') {
             return res.status(400).json({ error: 'Tipo de usuário inválido.' });
@@ -651,12 +666,14 @@ app.post('/api/register/:usertype', async (req, res) => {
 
             // Tenta salvar telefone na tabela `usuario` caso a coluna exista
             try {
-                await connection.execute('UPDATE usuario SET telefone = ? WHERE id_usuario = ?', [phone, userId]);
+                if (phoneVal) {
+                    await connection.execute('UPDATE usuario SET telefone = ? WHERE id_usuario = ?', [phoneVal, userId]);
+                }
             } catch (e) {
                 console.warn('Não foi possível salvar telefone na tabela `usuario` (coluna possivelmente ausente). Salvando no fallback de usuários.');
                 try {
                     const users = await readJsonFile('users.json');
-                    users.push({ id: userId, name, email, phone, userType, createdAt: new Date().toISOString() });
+                    users.push({ id: userId, name, email, phone: phoneVal, userType, createdAt: new Date().toISOString() });
                     await writeJsonFile('users.json', users);
                 } catch (err) {
                     console.error('Erro ao salvar telefone no fallback:', err);
@@ -665,11 +682,24 @@ app.post('/api/register/:usertype', async (req, res) => {
 
             // Insere dados específicos baseado no tipo de usuário
             if (userType === 'freelancer') {
-                await connection.execute(
-                    'INSERT INTO freelancer (id_usuario, experiencia, habilidades, descricao) VALUES (?, ?, ?, ?)',
-                    [userId, experience || '', skills || '', description || '']
-                );
-                console.log('Dados do freelancer inseridos com sucesso');
+                try {
+                    await connection.execute(
+                        'INSERT INTO freelancer (id_usuario, experiencia, habilidades, descricao) VALUES (?, ?, ?, ?)',
+                        [userId, experience || '', skills || '', description || '']
+                    );
+                    console.log('Dados do freelancer inseridos com sucesso');
+                } catch (e) {
+                    console.warn('Falha ao inserir dados do freelancer; seguindo com cadastro básico. Motivo:', e && e.sqlMessage ? e.sqlMessage : e.message || String(e));
+                    // Não aborta o cadastro: mantém usuário base criado
+                }
+                // Opcional: armazenar dados adicionais (cad/portfolio) no fallback file
+                try {
+                    const users = await readJsonFile('users.json');
+                    const idx = users.findIndex(u => u.id === userId);
+                    const merged = { id: userId, name, email, phone: phoneVal, userType, cad: req.body.cad || '', portfolio: req.body.portfolio || '', createdAt: new Date().toISOString() };
+                    if (idx !== -1) users[idx] = { ...users[idx], ...merged }; else users.push(merged);
+                    await writeJsonFile('users.json', users);
+                } catch (_) {}
             } else {
                 await connection.execute(
                     'INSERT INTO contratante (id_usuario, nome_empresa, descricao) VALUES (?, ?, ?)',
@@ -682,12 +712,31 @@ app.post('/api/register/:usertype', async (req, res) => {
             await connection.commit();
             console.log('Transação confirmada com sucesso');
 
+            // Confirmação de persistência: verifica se o usuário existe no banco
+            try {
+                const [confirmRows] = await connection.execute('SELECT id_usuario FROM usuario WHERE id_usuario = ?', [userId]);
+                if (confirmRows && confirmRows.length > 0) {
+                    console.log(`[registro] usuário persistido no DB com sucesso: id=${userId}`);
+                } else {
+                    console.warn(`[registro] usuário NÃO encontrado após commit: id=${userId} — verifique triggers/replicação.`);
+                }
+            } catch (confirmErr) {
+                console.warn('[registro] falha ao confirmar persistência no DB:', confirmErr && confirmErr.message ? confirmErr.message : String(confirmErr));
+            }
+
             // Gera o token JWT
             const token = jwt.sign(
                 { userId, userType, email, name },
                 JWT_SECRET,
                 { expiresIn: '24h' }
             );
+
+            // Marca verificado imediatamente (fluxo sem confirmação de e-mail em dev)
+            try {
+                await connection.execute('UPDATE usuario SET email_verificado = 1 WHERE id_usuario = ?', [userId]);
+            } catch (e) {
+                console.warn('Coluna email_verificado ausente; mantendo verificação apenas na resposta.');
+            }
 
             res.status(201).json({
                 message: 'Usuário registrado com sucesso',
@@ -696,7 +745,9 @@ app.post('/api/register/:usertype', async (req, res) => {
                     id: userId,
                     name,
                     email,
-                    userType
+                    userType,
+                    emailVerified: true,
+                    dbConfirmed: true
                 }
             });
 
@@ -736,9 +787,9 @@ app.post('/api/login', async (req, res) => {
 
         const connection = await getDbConnection();
 
-        // Busca o usuário pelo email
+        // Busca o usuário pelo email (inclui foto quando existir)
         const [users] = await connection.execute(
-            'SELECT id_usuario, nome, email, senha, tipo FROM usuario WHERE email = ?',
+            'SELECT id_usuario, nome, email, senha, tipo, foto FROM usuario WHERE email = ?',
             [email]
         );
 
@@ -757,7 +808,8 @@ app.post('/api/login', async (req, res) => {
                                 id: fallback.id,
                                 name: fallback.name,
                                 email: fallback.email,
-                                userType: fallback.userType || 'contratante'
+                                userType: fallback.userType || 'contratante',
+                                photo: fallback.photo || null
                             }
                         });
                     }
@@ -787,7 +839,8 @@ app.post('/api/login', async (req, res) => {
                                 id: fallback.id,
                                 name: fallback.name,
                                 email: fallback.email,
-                                userType: fallback.userType || users[0].tipo
+                                userType: fallback.userType || users[0].tipo,
+                                photo: fallback.photo || null
                             }
                         });
                     }
@@ -815,7 +868,8 @@ app.post('/api/login', async (req, res) => {
                 id: user.id_usuario,
                 name: user.nome,
                 email: user.email,
-                userType: user.tipo
+                userType: user.tipo,
+                photo: user.foto || null
             }
         });
 
@@ -841,14 +895,14 @@ app.get('/api/users/:userType', async (req, res) => {
         let query;
         if (userType === 'contratante') {
             query = `
-                SELECT u.id_usuario as id, u.nome as name, u.email, c.nome_empresa as companyName
+                SELECT u.id_usuario as id, u.nome as name, u.email, u.foto as photo, c.nome_empresa as companyName
                 FROM usuario u
                 JOIN contratante c ON u.id_usuario = c.id_usuario
                 WHERE u.tipo = ?
             `;
         } else {
             query = `
-                SELECT id_usuario as id, nome as name, email
+                SELECT id_usuario as id, nome as name, email, foto as photo
                 FROM usuario
                 WHERE tipo = ?
             `;
@@ -860,6 +914,45 @@ app.get('/api/users/:userType', async (req, res) => {
     } catch (error) {
         console.error(`Erro ao buscar usuários (${userType}):`, error);
         res.status(500).json({ error: 'Erro interno do servidor' });
+    } finally {
+        if (connection) try { connection.release(); } catch (e) {}
+    }
+});
+
+// Atualizar foto de perfil do usuário
+app.put('/api/users/:id/photo', async (req, res) => {
+    const userId = req.params.id;
+    const { photo } = req.body || {};
+    if (!photo) return res.status(400).json({ error: 'Campo photo é obrigatório (URL ou data string).' });
+    let connection;
+    try {
+        if (!dbAvailable) {
+            const users = await readJsonFile('users.json');
+            const idx = users.findIndex(u => String(u.id) === String(userId));
+            if (idx !== -1) {
+                users[idx].photo = photo;
+                await writeJsonFile('users.json', users);
+            } else {
+                users.push({ id: isNaN(Number(userId)) ? userId : Number(userId), photo });
+                await writeJsonFile('users.json', users);
+            }
+            try { if (firebaseDb) await firebaseDb.collection('users').doc(String(userId)).set({ photo }, { merge: true }); } catch {}
+            return res.json({ ok: true, id: userId, photo });
+        }
+        connection = await getDbConnection();
+        // Atualiza na tabela usuario se a coluna existir
+        try {
+            await connection.execute('UPDATE usuario SET foto = ? WHERE id_usuario = ?', [photo, userId]);
+        } catch (e) {
+            console.warn('Coluna `foto` ausente em usuario; ignorando atualização no DB:', e && e.code);
+        }
+        try { if (firebaseDb) await firebaseDb.collection('users').doc(String(userId)).set({ photo }, { merge: true }); } catch (fbErr) {
+            console.warn('Falha ao espelhar foto no Firebase:', fbErr && fbErr.message ? fbErr.message : fbErr);
+        }
+        res.json({ ok: true, id: userId, photo });
+    } catch (error) {
+        console.error('Erro ao atualizar foto:', error);
+        res.status(500).json({ error: 'Erro interno ao atualizar foto' });
     } finally {
         if (connection) try { connection.release(); } catch (e) {}
     }
@@ -931,19 +1024,30 @@ app.get('/api/messages/:userId/:contactId', async (req, res) => {
     let connection;
     try {
         connection = await getDbConnection();
-        const [messages] = await connection.execute(
+        let [messages] = await connection.execute(
             `SELECT id_mensagem as id, id_remetente as senderId, id_destinatario as receiverId, conteudo as content, data_envio as createdAt
              FROM mensagem
              WHERE (id_remetente = ? AND id_destinatario = ?) OR (id_remetente = ? AND id_destinatario = ?)
              ORDER BY data_envio ASC`,
             [userId, contactId, contactId, userId]
         );
+        if (!messages || !Array.isArray(messages)) messages = [];
         res.json(messages);
     } catch (error) {
         console.error('Erro ao buscar mensagens:', error);
         if (error && error.code === 'ER_BAD_FIELD_ERROR') {
             console.warn('[DB] ER_BAD_FIELD_ERROR; ativando fallback file.');
             dbAvailable = false;
+            try {
+                const [messagesAlt] = await getDbConnection().then(conn => conn.execute(
+                    `SELECT id_mensagem as id, id_remetente as senderId, id_destinatario as receiverId, mensagem as content, data_envio as createdAt
+                     FROM mensagem
+                     WHERE (id_remetente = ? AND id_destinatario = ?) OR (id_remetente = ? AND id_destinatario = ?)
+                     ORDER BY data_envio ASC`,
+                    [userId, contactId, contactId, userId]
+                ).finally(conn => { try { conn.release(); } catch {} }));
+                return res.json(messagesAlt);
+            } catch (_) {}
         }
         try {
             const msgs = await readJsonFile('messages.json');
@@ -951,6 +1055,112 @@ app.get('/api/messages/:userId/:contactId', async (req, res) => {
             return res.json(filtered);
         } catch (e) { return res.status(500).json({ error: 'Erro interno do servidor' }); }
     } finally { if (connection) try { connection.release(); } catch (e) {} }
+});
+
+// Resumo de conversas: último evento por contato para um usuário
+app.get('/api/messages/summary', async (req, res) => {
+    const { userId } = req.query;
+    if (!userId) return res.status(400).json({ error: 'userId é necessário' });
+
+    // Fallback por arquivo
+    if (!dbAvailable) {
+        try {
+            const msgs = await readJsonFile('messages.json');
+            const byOther = {};
+            const uid = String(userId);
+            // Ordena por createdAt desc para pegar primeiro por contato
+            const sorted = (msgs || []).slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+            for (const m of sorted) {
+                const a = String(m.senderId);
+                const b = String(m.receiverId);
+                if (a !== uid && b !== uid) continue;
+                const other = a === uid ? b : a;
+                if (!byOther[other]) {
+                    byOther[other] = {
+                        otherUserId: isNaN(Number(other)) ? other : Number(other),
+                        id: m.id,
+                        senderId: m.senderId,
+                        receiverId: m.receiverId,
+                        content: m.content,
+                        createdAt: m.createdAt,
+                    };
+                }
+            }
+            return res.json(Object.values(byOther));
+        } catch (e) {
+            console.error('Erro em GET /api/messages/summary (fallback):', e);
+            return res.status(500).json({ error: 'Erro interno' });
+        }
+    }
+
+    // Modo DB: buscar últimas mensagens por contato do usuário
+    let connection;
+    try {
+        connection = await getDbConnection();
+        const uid = userId;
+        // Seleciona todas mensagens do usuário ordenadas (desc) e consolida por contato no Node
+        let [rows] = await connection.execute(
+            `SELECT id_mensagem as id, id_remetente as senderId, id_destinatario as receiverId, conteudo as content, data_envio as createdAt
+             FROM mensagem
+             WHERE id_remetente = ? OR id_destinatario = ?
+             ORDER BY data_envio DESC`,
+            [uid, uid]
+        );
+        // Se a coluna 'conteudo' não existir, tenta coluna 'mensagem'
+        if (!rows || !Array.isArray(rows)) rows = [];
+        const byOther = {};
+        for (const m of rows) {
+            const a = String(m.senderId);
+            const b = String(m.receiverId);
+            const uidS = String(uid);
+            const other = a === uidS ? b : a;
+            if (!byOther[other]) {
+                byOther[other] = {
+                    otherUserId: isNaN(Number(other)) ? other : Number(other),
+                    id: m.id,
+                    senderId: isNaN(Number(m.senderId)) ? m.senderId : Number(m.senderId),
+                    receiverId: isNaN(Number(m.receiverId)) ? m.receiverId : Number(m.receiverId),
+                    content: m.content,
+                    createdAt: m.createdAt,
+                };
+            }
+        }
+        return res.json(Object.values(byOther));
+    } catch (error) {
+        console.error('Erro em GET /api/messages/summary (DB):', error);
+        if (error && error.code === 'ER_BAD_FIELD_ERROR') {
+            console.warn('[DB] ER_BAD_FIELD_ERROR; ativando fallback file.');
+            dbAvailable = false;
+            try {
+                const msgs = await readJsonFile('messages.json');
+                const byOther = {};
+                const uid = String(userId);
+                const sorted = (msgs || []).slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+                for (const m of sorted) {
+                    const a = String(m.senderId);
+                    const b = String(m.receiverId);
+                    if (a !== uid && b !== uid) continue;
+                    const other = a === uid ? b : a;
+                    if (!byOther[other]) {
+                        byOther[other] = {
+                            otherUserId: isNaN(Number(other)) ? other : Number(other),
+                            id: m.id,
+                            senderId: m.senderId,
+                            receiverId: m.receiverId,
+                            content: m.content,
+                            createdAt: m.createdAt,
+                        };
+                    }
+                }
+                return res.json(Object.values(byOther));
+            } catch (e) {
+                return res.status(500).json({ error: 'Erro interno' });
+            }
+        }
+        return res.status(500).json({ error: 'Erro interno do servidor' });
+    } finally {
+        if (connection) try { connection.release(); } catch (e) {}
+    }
 });
 
 // Rota para enviar uma mensagem
@@ -987,10 +1197,24 @@ app.post('/api/messages', async (req, res) => {
     let connection;
     try {
         connection = await getDbConnection();
-        const [result] = await connection.execute(
-          'INSERT INTO mensagem (id_remetente, id_destinatario, conteudo, data_envio) VALUES (?, ?, ?, NOW())',
-          [isNaN(sId) ? senderId : sId, isNaN(rId) ? receiverId : rId, content]
-        );
+                let result;
+                try {
+                        [result] = await connection.execute(
+                            'INSERT INTO mensagem (id_remetente, id_destinatario, conteudo, data_envio) VALUES (?, ?, ?, NOW())',
+                            [isNaN(sId) ? senderId : sId, isNaN(rId) ? receiverId : rId, content]
+                        );
+                } catch (e) {
+                        if (e && e.code === 'ER_BAD_FIELD_ERROR') {
+                                // Tenta inserir usando coluna alternativa 'mensagem'
+                                const [resultAlt] = await connection.execute(
+                                    'INSERT INTO mensagem (id_remetente, id_destinatario, mensagem, data_envio) VALUES (?, ?, ?, NOW())',
+                                    [isNaN(sId) ? senderId : sId, isNaN(rId) ? receiverId : rId, content]
+                                );
+                                result = resultAlt;
+                        } else {
+                                throw e;
+                        }
+                }
                 const newMessage = { id: result.insertId, senderId: isNaN(sId) ? senderId : sId, receiverId: isNaN(rId) ? receiverId : rId, content, createdAt: new Date().toISOString() };
                 // persistência espeelho no Firebase (best-effort)
                 try {
@@ -1026,6 +1250,35 @@ app.post('/api/messages', async (req, res) => {
         }
     } finally {
         if (connection) try { connection.release(); } catch (e) {}
+    }
+});
+
+// Upload de arquivos (imagens) para Firebase Storage, retorna URL pública
+const upload = multer({ storage: multer.memoryStorage() });
+app.post('/api/upload', upload.single('arquivo'), async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
+        // bucket via firebase-admin
+        let bucket;
+        try {
+            const admin = require('firebase-admin');
+            bucket = admin.storage().bucket();
+        } catch (e) {
+            console.error('Firebase admin indisponível para Storage:', e);
+            return res.status(500).json({ error: 'Storage não configurado' });
+        }
+        const name = `${uuidv4()}-${(req.file.originalname || 'upload').replace(/\s+/g, '-')}`;
+        const file = bucket.file(name);
+        await file.save(req.file.buffer, {
+            contentType: req.file.mimetype || 'application/octet-stream',
+            public: true,
+            metadata: { firebaseStorageDownloadTokens: uuidv4() }
+        });
+        const publicUrl = `https://storage.googleapis.com/${bucket.name}/${encodeURIComponent(name)}`;
+        return res.json({ url: publicUrl });
+    } catch (err) {
+        console.error('Erro no upload:', err);
+        return res.status(500).json({ error: 'Erro ao fazer upload' });
     }
 });
 
@@ -1287,6 +1540,57 @@ app.put('/api/notifications/:id', async (req, res) => {
     } catch (e) {
         console.error('Erro em PUT /api/notifications/:id', e);
         res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+// Cria notificação de mensagem (fallback arquivo; em DB mode também usa arquivo simples)
+app.post('/api/notifications', async (req, res) => {
+    try {
+        const { ownerId, fromId, type = 'message', content = '' } = req.body || {};
+        if (!ownerId || fromId == null) {
+            return res.status(400).json({ error: 'ownerId e fromId são obrigatórios' });
+        }
+        const notes = await readJsonFile('notifications.json');
+        const note = {
+            id: generateId(),
+            userId: ownerId,
+            ownerId,
+            fromId,
+            type,
+            content: String(content || '').slice(0, 200),
+            read: false,
+            createdAt: new Date().toISOString(),
+        };
+        notes.push(note);
+        await writeJsonFile('notifications.json', notes);
+        return res.status(201).json(note);
+    } catch (e) {
+        console.error('Erro em POST /api/notifications:', e);
+        return res.status(500).json({ error: 'Erro interno' });
+    }
+});
+
+// Marca notificações de chat como lidas para um par ownerId/otherUserId
+app.post('/api/notifications/mark-chat-read', async (req, res) => {
+    try {
+        const { ownerId, otherUserId } = req.body || {};
+        if (!ownerId || otherUserId == null) {
+            return res.status(400).json({ error: 'ownerId e otherUserId são obrigatórios' });
+        }
+        const notes = await readJsonFile('notifications.json');
+        let changed = false;
+        for (let i = 0; i < notes.length; i++) {
+            const n = notes[i];
+            if (String(n.ownerId) === String(ownerId) && String(n.fromId) === String(otherUserId) && !n.read) {
+                notes[i] = { ...n, read: true, updatedAt: new Date().toISOString() };
+                changed = true;
+            }
+        }
+        if (changed) await writeJsonFile('notifications.json', notes);
+        return res.json({ success: true });
+    } catch (e) {
+        console.error('Erro em POST /api/notifications/mark-chat-read:', e);
+        return res.status(500).json({ error: 'Erro interno' });
     }
 });
 
