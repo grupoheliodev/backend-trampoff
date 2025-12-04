@@ -49,5 +49,14 @@
     "coverLetter": "",
     "status": "pending",
     "createdAt": "2025-12-02T02:33:20.833Z"
+  },
+  {
+    "id": 1764813352057,
+    "jobId": "1763473014121",
+    "userId": 25,
+    "coverLetter": "",
+    "status": "accepted",
+    "createdAt": "2025-12-04T01:55:44.268Z",
+    "updatedAt": "2025-12-04T03:06:02.215Z"
   }
 ]

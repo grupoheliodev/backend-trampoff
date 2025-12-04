@@ -327,5 +327,61 @@
     "receiverId": 21,
     "content": "Ola",
     "createdAt": "2025-12-03T03:17:02.799Z"
+  },
+  {
+    "id": 1764813033528,
+    "senderId": 25,
+    "receiverId": 26,
+    "content": "Ola Digimon",
+    "createdAt": "2025-12-04T01:50:26.885Z"
+  },
+  {
+    "id": 1764821835483,
+    "senderId": 25,
+    "receiverId": 26,
+    "content": "Ola",
+    "createdAt": "2025-12-04T04:17:12.749Z"
+  },
+  {
+    "id": 1764822356008,
+    "senderId": 26,
+    "receiverId": 25,
+    "content": "Ola",
+    "createdAt": "2025-12-04T04:25:51.264Z"
+  },
+  {
+    "id": 1764822497517,
+    "senderId": 25,
+    "receiverId": 26,
+    "content": "Oka",
+    "createdAt": "2025-12-04T04:28:17.480Z"
+  },
+  {
+    "id": 1764822516500,
+    "senderId": 26,
+    "receiverId": 25,
+    "content": "Como vai",
+    "createdAt": "2025-12-04T04:28:31.273Z"
+  },
+  {
+    "id": 1764822543493,
+    "senderId": 25,
+    "receiverId": 26,
+    "content": "bem",
+    "createdAt": "2025-12-04T04:28:58.121Z"
+  },
+  {
+    "id": 1764827296967,
+    "senderId": 26,
+    "receiverId": 25,
+    "content": "asa",
+    "createdAt": "2025-12-04T05:48:08.433Z"
+  },
+  {
+    "id": 1764827304118,
+    "senderId": 25,
+    "receiverId": 26,
+    "content": "asa",
+    "createdAt": "2025-12-04T05:48:18.697Z"
   }
 ]

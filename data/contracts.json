@@ -27,5 +27,16 @@
     "agreedAt": "2025-11-19T11:25:00.209Z",
     "completedAt": "2025-11-19T11:25:54.002Z",
     "updatedAt": "2025-11-19T11:25:54.014Z"
+  },
+  {
+    "id": 1764817570978,
+    "jobId": 1763473014121,
+    "employerId": 26,
+    "freelancerId": 25,
+    "price": 10220,
+    "status": "completed",
+    "agreedAt": "2025-12-04T03:06:02.220Z",
+    "completedAt": "2025-12-04T03:06:26.569Z",
+    "updatedAt": "2025-12-04T03:06:26.575Z"
   }
 ]

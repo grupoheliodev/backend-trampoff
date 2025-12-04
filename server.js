@@ -336,19 +336,12 @@ app.get('/api/status', async (req, res) => {
     }
 });
 
-// Lista usuários por tipo (contratante ou freelancer)
-app.get('/api/users/:tipo', async (req, res) => {
-    try {
-        const tipo = String(req.params.tipo).toLowerCase();
-        const users = await readJsonFile('users.json');
-        const mappedType = tipo.includes('contrat') ? 'contratante' : (tipo.includes('free') ? 'freelancer' : tipo);
-        const filtered = users.filter(u => String(u.userType).toLowerCase() === mappedType);
-        res.json(filtered.map(u => ({ ...u, password: undefined })));
-    } catch (e) {
-        console.error('Erro em GET /api/users/:tipo', e);
-        res.status(500).json({ error: 'Erro interno' });
-    }
-});
+// NOTE: The DB-backed `/api/users/:userType` handler (defined later)
+// serves the users list. The previous file-backed endpoint was
+// shadowing it and causing clients to receive stale data from
+// `data/users.json` even after DB inserts. That handler was
+// removed so the application always prefers the relational DB
+// (and the later handler will fallback to file when DB is down).
 
 // Social login (mock dev)
 app.post('/api/social-login', async (req, res) => {
@@ -455,6 +448,7 @@ app.post('/api/register-base', async (req, res) => {
 
         connection = await getDbConnection();
         await connection.beginTransaction();
+        console.log('[registro] conexão obtida e transação iniciada (primeiro ponto)');
 
         // Verifica se o email já existe
         const [existingUsers] = await connection.execute(
@@ -583,11 +577,17 @@ app.post('/api/register/:usertype', async (req, res) => {
             email, 
             password,
             phone,
-            companyName,  // apenas para contratante
+            companyName: rawCompanyName,  // apenas para contratante (nome padrão)
             description, 
             skills,       // apenas para freelancer
-            experience    // apenas para freelancer
+            experience,   // apenas para freelancer
+            empresa,
+            nomeEmpresa,
+            company_name
         } = req.body;
+
+        // Normaliza o nome da empresa a partir de vários aliases usados no frontend
+        const companyName = rawCompanyName || empresa || nomeEmpresa || company_name || null;
 
         // Validações básicas
         if (!name || !email || !password) {
@@ -609,9 +609,14 @@ app.post('/api/register/:usertype', async (req, res) => {
             return res.status(400).json({ error: 'Nome da empresa é obrigatório para contratantes.' });
         }
 
-        // If DB is not available, use file-backed users storage
-        if (!dbAvailable) {
-            // create fallback user
+        // Tenta obter conexão com o banco mesmo que `dbAvailable` esteja false.
+        // Isso permite que o servidor recupere conexões intermitentes sem permanecer em modo fallback.
+        try {
+            connection = await getDbConnection();
+            console.log('[registro] getDbConnection() succeeded (proceeding to DB insert)');
+            await connection.beginTransaction();
+        } catch (connErr) {
+            console.warn('[registro] DB indisponível no momento, usando fallback de arquivo. erro:', connErr && connErr.message ? connErr.message : connErr);
             try {
                 const users = await readJsonFile('users.json');
                 const id = generateId();
@@ -621,13 +626,10 @@ app.post('/api/register/:usertype', async (req, res) => {
                 await writeJsonFile('users.json', users);
                 return res.status(201).json({ message: 'Usuário criado em modo offline (fallback).', userId: id, user: newUser });
             } catch (e) {
-                console.error('Erro ao salvar usuário no fallback (file):', e);
+                console.error('[registro] Erro ao salvar usuário no fallback (file):', e);
                 return res.status(500).json({ error: 'Erro interno ao salvar usuário (fallback).' });
             }
         }
-
-        connection = await getDbConnection();
-        await connection.beginTransaction();
 
         // Verifica se o email já existe
         const [existingUsers] = await connection.execute(
@@ -643,54 +645,49 @@ app.post('/api/register/:usertype', async (req, res) => {
         // Hash da senha
         const hashedPassword = await bcrypt.hash(password, saltRounds);
 
-        // Inicia a transação
-        await connection.beginTransaction();
-        console.log('Transação iniciada');
+        // Inicia a transação (já iniciada acima)
+        console.log('[registro] entrando na sequência de inserções (usuário -> específico)');
 
         try {
             // Insere o usuário base
-            console.log('Tentando inserir usuário com os dados (confirmação de senha desativada):', {
-                    email,
-                    name,
-                    userType,
-                    hashedPassword: 'SENHA_HASHEADA'
-                });
-            
-            // Insere o usuário base
+            console.log('[registro] Tentando inserir usuário base com dados:', { email, name, userType });
             const [userResult] = await connection.execute(
                 'INSERT INTO usuario (email, nome, senha, tipo, data_criacao) VALUES (?, ?, ?, ?, CURDATE())',
                 [email, name, hashedPassword, userType]
             );
             const userId = userResult.insertId;
-            console.log('Usuário inserido com sucesso, ID:', userId);
+            console.log('[registro] Usuário inserido, insertId=', userId, ' affectedRows=', userResult.affectedRows || 1);
 
             // Tenta salvar telefone na tabela `usuario` caso a coluna exista
-            try {
-                if (phoneVal) {
-                    await connection.execute('UPDATE usuario SET telefone = ? WHERE id_usuario = ?', [phoneVal, userId]);
-                }
-            } catch (e) {
-                console.warn('Não foi possível salvar telefone na tabela `usuario` (coluna possivelmente ausente). Salvando no fallback de usuários.');
+            if (phoneVal) {
                 try {
-                    const users = await readJsonFile('users.json');
-                    users.push({ id: userId, name, email, phone: phoneVal, userType, createdAt: new Date().toISOString() });
-                    await writeJsonFile('users.json', users);
-                } catch (err) {
-                    console.error('Erro ao salvar telefone no fallback:', err);
+                    console.log('[registro] Tentando salvar telefone na tabela usuario:', phoneVal);
+                    await connection.execute('UPDATE usuario SET telefone = ? WHERE id_usuario = ?', [phoneVal, userId]);
+                    console.log('[registro] Telefone salvo no DB com sucesso');
+                } catch (e) {
+                    console.warn('[registro] Não foi possível salvar telefone na tabela `usuario` (coluna possivelmente ausente):', e && e.code ? e.code : e.message || e);
+                    try {
+                        const users = await readJsonFile('users.json');
+                        users.push({ id: userId, name, email, phone: phoneVal, userType, createdAt: new Date().toISOString() });
+                        await writeJsonFile('users.json', users);
+                        console.log('[registro] Telefone salvo no fallback users.json');
+                    } catch (err) {
+                        console.error('[registro] Erro ao salvar telefone no fallback:', err && err.message ? err.message : err);
+                    }
                 }
             }
 
             // Insere dados específicos baseado no tipo de usuário
             if (userType === 'freelancer') {
                 try {
+                    console.log('[registro] Inserindo dados em freelancer para id=', userId);
                     await connection.execute(
                         'INSERT INTO freelancer (id_usuario, experiencia, habilidades, descricao) VALUES (?, ?, ?, ?)',
                         [userId, experience || '', skills || '', description || '']
                     );
-                    console.log('Dados do freelancer inseridos com sucesso');
+                    console.log('[registro] Dados do freelancer inseridos com sucesso');
                 } catch (e) {
-                    console.warn('Falha ao inserir dados do freelancer; seguindo com cadastro básico. Motivo:', e && e.sqlMessage ? e.sqlMessage : e.message || String(e));
-                    // Não aborta o cadastro: mantém usuário base criado
+                    console.warn('[registro] Falha ao inserir dados do freelancer; mantendo usuário base. Motivo:', e && e.sqlMessage ? e.sqlMessage : e.message || String(e));
                 }
                 // Opcional: armazenar dados adicionais (cad/portfolio) no fallback file
                 try {
@@ -701,36 +698,36 @@ app.post('/api/register/:usertype', async (req, res) => {
                     await writeJsonFile('users.json', users);
                 } catch (_) {}
             } else {
-                await connection.execute(
-                    'INSERT INTO contratante (id_usuario, nome_empresa, descricao) VALUES (?, ?, ?)',
-                    [userId, companyName, description || '']
-                );
-                console.log('Dados do contratante inseridos com sucesso');
+                try {
+                    console.log('[registro] Inserindo dados em contratante para id=', userId, ' companyName=', companyName);
+                    await connection.execute(
+                        'INSERT INTO contratante (id_usuario, nome_empresa, descricao) VALUES (?, ?, ?)',
+                        [userId, companyName, description || '']
+                    );
+                    console.log('[registro] Dados do contratante inseridos com sucesso');
+                } catch (e) {
+                    console.warn('[registro] Falha ao inserir dados do contratante; mantendo usuário base. Motivo:', e && e.sqlMessage ? e.sqlMessage : e.message || String(e));
+                    try {
+                        const users = await readJsonFile('users.json');
+                        const idx = users.findIndex(u => u.id === userId);
+                        const fallback = { id: userId, name, email, phone: phoneVal, userType, companyName: companyName || '', description: description || '', createdAt: new Date().toISOString() };
+                        if (idx !== -1) users[idx] = { ...users[idx], ...fallback }; else users.push(fallback);
+                        await writeJsonFile('users.json', users);
+                        console.log('[registro] Dados do contratante salvos no fallback users.json');
+                    } catch (err) {
+                        console.error('[registro] Erro ao salvar dados do contratante no fallback:', err && err.message ? err.message : err);
+                    }
+                }
             }
 
             // Confirma a transação
-            await connection.commit();
-            console.log('Transação confirmada com sucesso');
-
-            // Confirmação de persistência: verifica se o usuário existe no banco
             try {
-                const [confirmRows] = await connection.execute('SELECT id_usuario FROM usuario WHERE id_usuario = ?', [userId]);
-                if (confirmRows && confirmRows.length > 0) {
-                    console.log(`[registro] usuário persistido no DB com sucesso: id=${userId}`);
-                } else {
-                    console.warn(`[registro] usuário NÃO encontrado após commit: id=${userId} — verifique triggers/replicação.`);
-                }
-            } catch (confirmErr) {
-                console.warn('[registro] falha ao confirmar persistência no DB:', confirmErr && confirmErr.message ? confirmErr.message : String(confirmErr));
+                await connection.commit();
+                console.log('[registro] Transação confirmada com sucesso (commit)');
+            } catch (commitErr) {
+                console.error('[registro] Erro ao confirmar transação (commit):', commitErr && commitErr.message ? commitErr.message : commitErr);
+                throw commitErr;
             }
-
-            // Gera o token JWT
-            const token = jwt.sign(
-                { userId, userType, email, name },
-                JWT_SECRET,
-                { expiresIn: '24h' }
-            );
-
             // Marca verificado imediatamente (fluxo sem confirmação de e-mail em dev)
             try {
                 await connection.execute('UPDATE usuario SET email_verificado = 1 WHERE id_usuario = ?', [userId]);
@@ -783,99 +780,181 @@ app.post('/api/login', async (req, res) => {
             return res.status(400).json({ error: 'Email e senha são obrigatórios.' });
         }
 
-        console.log(`[login] tentativa de login para email=${email}, passwordPresent=${!!password}`);
-
-        const connection = await getDbConnection();
-
-        // Busca o usuário pelo email (inclui foto quando existir)
-        const [users] = await connection.execute(
-            'SELECT id_usuario, nome, email, senha, tipo, foto FROM usuario WHERE email = ?',
-            [email]
-        );
-
-        try { connection.release(); } catch (e) { try { await connection.end(); } catch (e2) {} }
-
-        if (users.length === 0) {
-            // Fallback dev: busca em arquivo users.json se habilitado
-            if (process.env.DEV_FILE_LOGIN === 'true') {
-                try {
-                    const fileUsers = await readJsonFile('users.json');
-                    const fallback = fileUsers.find(u => (u.email||'').toLowerCase() === email.toLowerCase());
-                    if (fallback && fallback.password === password) {
-                        return res.json({
-                            token: 'dev-fallback',
-                            user: {
-                                id: fallback.id,
-                                name: fallback.name,
-                                email: fallback.email,
-                                userType: fallback.userType || 'contratante',
-                                photo: fallback.photo || null
-                            }
-                        });
-                    }
-                } catch (e) {
-                    console.warn('[login fallback] erro ao ler users.json', e.message);
-                }
-            }
-            return res.status(401).json({ error: 'Usuário não encontrado.' });
-        }
-
-    const user = users[0];
-    console.log(`[login] encontrado usuário id=${user.id_usuario}, hashLen=${user.senha ? user.senha.length : 0}`);
-
-    // Verifica a senha
-    const validPassword = await bcrypt.compare(password, user.senha);
-    console.log(`[login] password match for email=${email}: ${validPassword}`);
-        if (!validPassword) {
-            // Fallback dev: tentar arquivo se senha hash não bate
-            if (process.env.DEV_FILE_LOGIN === 'true') {
-                try {
-                    const fileUsers = await readJsonFile('users.json');
-                    const fallback = fileUsers.find(u => (u.email||'').toLowerCase() === email.toLowerCase());
-                    if (fallback && fallback.password === password) {
-                        return res.json({
-                            token: 'dev-fallback',
-                            user: {
-                                id: fallback.id,
-                                name: fallback.name,
-                                email: fallback.email,
-                                userType: fallback.userType || users[0].tipo,
-                                photo: fallback.photo || null
-                            }
-                        });
-                    }
-                } catch (e) {
-                    console.warn('[login fallback senha] erro ao ler users.json', e.message);
-                }
-            }
-            return res.status(401).json({ error: 'Senha incorreta.' });
-        }
-
-        // Gera o token JWT
-        const token = jwt.sign(
-            { 
-                userId: user.id_usuario, 
-                userType: user.tipo, 
-                email: user.email 
-            },
-            JWT_SECRET,
-            { expiresIn: '24h' }
-        );
-
-        res.json({
-            token,
-            user: {
-                id: user.id_usuario,
-                name: user.nome,
-                email: user.email,
-                userType: user.tipo,
-                photo: user.foto || null
-            }
+        // Timeout wrapper: se o processo de login não completar em LOGIN_TIMEOUT_MS (default 5000ms), aborta com diagnóstico
+        const timeoutMs = parseInt(process.env.LOGIN_TIMEOUT_MS || '5000', 10);
+        let timeoutId;
+        const timeoutPromise = new Promise((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error('Login timeout exceeded')), timeoutMs);
         });
 
+        try {
+            await Promise.race([ (async () => {
+            console.log(`[login] tentativa de login para email=${email}, passwordPresent=${!!password}`);
+
+            console.log('[login] obtendo conexão com o pool...');
+            let connection;
+            try {
+                connection = await getDbConnection();
+                console.log('[login] conexão obtida; executando SELECT do usuário...');
+            } catch (connErr) {
+                console.error('[login] erro ao obter conexão do pool:', connErr && connErr.message ? connErr.message : connErr);
+                // Tenta fallback de arquivo local quando o banco está indisponível
+                try {
+                    const fileUsers = await readJsonFile('users.json');
+                    const fallback = (fileUsers || []).find(u => (u.email||'').toLowerCase() === String(email||'').toLowerCase());
+                    if (fallback) {
+                        let matched = false;
+                        // suporta senhas em texto simples ou hash bcrypt
+                        if (fallback.password && fallback.password === password) matched = true;
+                        else if (fallback.password) {
+                            try { matched = await bcrypt.compare(password, fallback.password); } catch (e) { matched = false; }
+                        }
+                        if (matched) {
+                            return res.json({
+                                token: 'dev-fallback',
+                                user: {
+                                    id: fallback.id,
+                                    name: fallback.name,
+                                    email: fallback.email,
+                                    userType: fallback.userType || 'contratante',
+                                    photo: fallback.photo || null
+                                }
+                            });
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[login fallback] erro ao ler users.json', e && e.message ? e.message : e);
+                }
+                return res.status(503).json({ error: 'Banco de dados indisponível (connect timeout). Tente novamente mais tarde.' });
+            }
+
+            // Busca o usuário pelo email (sem coluna foto, que pode não existir na tabela)
+            let users;
+            try {
+                const result = await connection.execute(
+                    'SELECT id_usuario, nome, email, senha, tipo, IFNULL(foto, NULL) as foto FROM usuario WHERE email = ?',
+                    [email]
+                );
+                users = result[0];
+                console.log(`[login] SELECT retornou ${Array.isArray(users) ? users.length : 0} linhas`);
+            } catch (execErr) {
+                console.error('[login] erro ao executar query de usuário:', execErr && execErr.message ? execErr.message : execErr);
+                try { connection.release(); } catch (e) { try { await connection.end(); } catch (e2) {} }
+                return res.status(500).json({ error: 'Erro ao buscar usuário' });
+            }
+
+            try { connection.release(); } catch (e) { try { await connection.end(); } catch (e2) {} }
+
+            if (users.length === 0) {
+                // Fallback dev: busca em arquivo users.json se habilitado
+                if (process.env.DEV_FILE_LOGIN === 'true') {
+                    try {
+                        const fileUsers = await readJsonFile('users.json');
+                        const fallback = fileUsers.find(u => (u.email||'').toLowerCase() === email.toLowerCase());
+                        if (fallback && fallback.password === password) {
+                            return res.json({
+                                token: 'dev-fallback',
+                                user: {
+                                    id: fallback.id,
+                                    name: fallback.name,
+                                    email: fallback.email,
+                                    userType: fallback.userType || 'contratante',
+                                    photo: fallback.photo || null
+                                }
+                            });
+                        }
+                    } catch (e) {
+                        console.warn('[login fallback] erro ao ler users.json', e.message);
+                    }
+                }
+                return res.status(401).json({ error: 'Usuário não encontrado.' });
+            }
+
+            const user = users[0];
+            console.log(`[login] encontrado usuário id=${user.id_usuario}, hashLen=${user.senha ? user.senha.length : 0}`);
+
+            // Verifica a senha (com logs de timing)
+            console.log('[login] iniciando verificação de senha...');
+            const passStart = Date.now();
+            let validPassword = false;
+            try {
+                validPassword = await bcrypt.compare(password, user.senha);
+                const passMs = Date.now() - passStart;
+                console.log(`[login] password compare finished in ${passMs}ms; match=${validPassword}`);
+            } catch (bcryptErr) {
+                console.error('[login] erro durante bcrypt.compare:', bcryptErr && bcryptErr.message ? bcryptErr.message : bcryptErr);
+                return res.status(500).json({ error: 'Erro ao verificar senha' });
+            }
+            if (!validPassword) {
+                // Fallback dev: tentar arquivo se senha hash não bate
+                if (process.env.DEV_FILE_LOGIN === 'true') {
+                    try {
+                        const fileUsers = await readJsonFile('users.json');
+                        const fallback = fileUsers.find(u => (u.email||'').toLowerCase() === email.toLowerCase());
+                        if (fallback && fallback.password === password) {
+                            return res.json({
+                                token: 'dev-fallback',
+                                user: {
+                                    id: fallback.id,
+                                    name: fallback.name,
+                                    email: fallback.email,
+                                    userType: fallback.userType || users[0].tipo,
+                                    photo: fallback.photo || null
+                                }
+                            });
+                        }
+                    } catch (e) {
+                        console.warn('[login fallback senha] erro ao ler users.json', e.message);
+                    }
+                }
+                return res.status(401).json({ error: 'Senha incorreta.' });
+            }
+
+            // Gera o token JWT
+            console.log('[login] gerando token JWT...');
+            let token;
+            try {
+                token = jwt.sign(
+                    { 
+                        userId: user.id_usuario, 
+                        userType: user.tipo, 
+                        email: user.email 
+                    },
+                    JWT_SECRET,
+                    { expiresIn: '24h' }
+                );
+                console.log('[login] token gerado; enviando resposta...');
+            } catch (jwtErr) {
+                console.error('[login] erro ao gerar token JWT:', jwtErr && jwtErr.message ? jwtErr.message : jwtErr);
+                return res.status(500).json({ error: 'Erro ao gerar token' });
+            }
+
+            res.json({
+                token,
+                user: {
+                    id: user.id_usuario,
+                    name: user.nome,
+                    email: user.email,
+                    userType: user.tipo,
+                    photo: user.foto || null
+                }
+            });
+            console.log('[login] resposta enviada para o cliente.');
+
+        })(), timeoutPromise ]);
+        } finally {
+            try { if (timeoutId) clearTimeout(timeoutId); } catch (_) {}
+        }
+
     } catch (error) {
-        console.error('Erro no login:', error);
-        res.status(500).json({ error: 'Erro interno do servidor' });
+        if (error && error.message && error.message.includes('Login timeout')) {
+            console.error('[login] timeout:', error.message);
+            return res.status(504).json({ error: 'Login timeout: operação excedeu 5 segundos' });
+        }
+        console.error('Erro no login:', error && error.stack ? error.stack : error);
+        const message = (error && error.message) ? String(error.message) : 'Erro interno do servidor';
+        const shortStack = error && error.stack ? String(error.stack).split('\n').slice(0,3).join(' | ') : undefined;
+        return res.status(500).json({ error: message, details: shortStack });
     }
 });
 
@@ -926,7 +1005,33 @@ app.put('/api/users/:id/photo', async (req, res) => {
     if (!photo) return res.status(400).json({ error: 'Campo photo é obrigatório (URL ou data string).' });
     let connection;
     try {
-        if (!dbAvailable) {
+        // Primary persistence: Firebase (preferred)
+        if (firebaseDb) {
+            try {
+                await firebaseDb.collection('users').doc(String(userId)).set({ photo }, { merge: true });
+                return res.json({ ok: true, id: userId, photo, primary: 'firebase' });
+            } catch (fbErr) {
+                console.warn('[photo] Falha ao salvar foto no Firebase, tentando fallback para DB/file:', fbErr && fbErr.message ? fbErr.message : fbErr);
+            }
+        }
+
+        // Secondary: try relational DB (best-effort). Do not attempt schema changes here.
+        try {
+            connection = await getDbConnection();
+            try {
+                await connection.execute('UPDATE usuario SET foto = ? WHERE id_usuario = ?', [photo, userId]);
+                // Also attempt to mirror to Firebase if available (best-effort)
+                try { if (firebaseDb) await firebaseDb.collection('users').doc(String(userId)).set({ photo }, { merge: true }); } catch (fbErr) { console.warn('Falha ao espelhar foto no Firebase (after DB):', fbErr && fbErr.message ? fbErr.message : fbErr); }
+                return res.json({ ok: true, id: userId, photo, primary: 'db' });
+            } catch (dbUpdErr) {
+                console.warn('[photo] Não foi possível atualizar coluna `foto` no DB (ou coluna ausente):', dbUpdErr && dbUpdErr.message ? dbUpdErr.message : dbUpdErr);
+            }
+        } catch (dbConnErr) {
+            console.warn('[photo] Falha ao conectar ao DB para atualizar foto:', dbConnErr && dbConnErr.message ? dbConnErr.message : dbConnErr);
+        }
+
+        // Final fallback: store in file-backed users.json
+        try {
             const users = await readJsonFile('users.json');
             const idx = users.findIndex(u => String(u.id) === String(userId));
             if (idx !== -1) {
@@ -936,20 +1041,13 @@ app.put('/api/users/:id/photo', async (req, res) => {
                 users.push({ id: isNaN(Number(userId)) ? userId : Number(userId), photo });
                 await writeJsonFile('users.json', users);
             }
-            try { if (firebaseDb) await firebaseDb.collection('users').doc(String(userId)).set({ photo }, { merge: true }); } catch {}
-            return res.json({ ok: true, id: userId, photo });
+            // Mirror to Firebase if it becomes available (best-effort)
+            try { if (firebaseDb) await firebaseDb.collection('users').doc(String(userId)).set({ photo }, { merge: true }); } catch (fbErr) { console.warn('Falha ao espelhar foto no Firebase (fallback):', fbErr && fbErr.message ? fbErr.message : fbErr); }
+            return res.json({ ok: true, id: userId, photo, fallback: true });
+        } catch (fileErr) {
+            console.error('[photo] Falha ao salvar foto no fallback de arquivo:', fileErr && fileErr.message ? fileErr.message : fileErr);
+            return res.status(500).json({ error: 'Erro interno ao salvar foto' });
         }
-        connection = await getDbConnection();
-        // Atualiza na tabela usuario se a coluna existir
-        try {
-            await connection.execute('UPDATE usuario SET foto = ? WHERE id_usuario = ?', [photo, userId]);
-        } catch (e) {
-            console.warn('Coluna `foto` ausente em usuario; ignorando atualização no DB:', e && e.code);
-        }
-        try { if (firebaseDb) await firebaseDb.collection('users').doc(String(userId)).set({ photo }, { merge: true }); } catch (fbErr) {
-            console.warn('Falha ao espelhar foto no Firebase:', fbErr && fbErr.message ? fbErr.message : fbErr);
-        }
-        res.json({ ok: true, id: userId, photo });
     } catch (error) {
         console.error('Erro ao atualizar foto:', error);
         res.status(500).json({ error: 'Erro interno ao atualizar foto' });
@@ -994,9 +1092,23 @@ app.get('/api/messages', async (req, res) => {
         res.json(messages);
     } catch (error) {
         console.error('Erro ao buscar mensagens (query):', error);
+        // Se a coluna 'conteudo' não existir, tentar coluna alternativa 'mensagem' antes de cair no fallback
         if (error && error.code === 'ER_BAD_FIELD_ERROR') {
-            console.warn('[DB] ER_BAD_FIELD_ERROR; ativando fallback file.');
-            dbAvailable = false;
+            console.warn('[DB] ER_BAD_FIELD_ERROR; tentando coluna alternativa `mensagem`');
+            try {
+                const [messagesAlt] = await getDbConnection().then(conn => conn.execute(
+                    `SELECT id_mensagem as id, id_remetente as senderId, id_destinatario as receiverId, mensagem as content, data_envio as createdAt
+                     FROM mensagem
+                     WHERE (id_remetente = ? AND id_destinatario = ?) OR (id_remetente = ? AND id_destinatario = ?)
+                     ORDER BY data_envio ASC`,
+                    [user1, user2, user2, user1]
+                ).finally(conn => { try { conn.release(); } catch {} }));
+                return res.json(messagesAlt);
+            } catch (e2) {
+                console.warn('[DB] Consulta alternativa também falhou:', e2 && e2.message ? e2.message : e2);
+                // marcar fallback apenas se ambas tentativas falharem
+                dbAvailable = false;
+            }
         }
         try {
             const msgs = await readJsonFile('messages.json');
@@ -1129,32 +1241,64 @@ app.get('/api/messages/summary', async (req, res) => {
     } catch (error) {
         console.error('Erro em GET /api/messages/summary (DB):', error);
         if (error && error.code === 'ER_BAD_FIELD_ERROR') {
-            console.warn('[DB] ER_BAD_FIELD_ERROR; ativando fallback file.');
-            dbAvailable = false;
+            console.warn('[DB] ER_BAD_FIELD_ERROR; tentando coluna alternativa `mensagem`');
             try {
-                const msgs = await readJsonFile('messages.json');
+                const connectionAlt = await getDbConnection();
+                let [rowsAlt] = await connectionAlt.execute(
+                    `SELECT id_mensagem as id, id_remetente as senderId, id_destinatario as receiverId, mensagem as content, data_envio as createdAt
+                     FROM mensagem
+                     WHERE id_remetente = ? OR id_destinatario = ?
+                     ORDER BY data_envio DESC`,
+                    [uid, uid]
+                );
+                try { connectionAlt.release(); } catch (_) {}
+                if (!rowsAlt || !Array.isArray(rowsAlt)) rowsAlt = [];
                 const byOther = {};
-                const uid = String(userId);
-                const sorted = (msgs || []).slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-                for (const m of sorted) {
+                for (const m of rowsAlt) {
                     const a = String(m.senderId);
                     const b = String(m.receiverId);
-                    if (a !== uid && b !== uid) continue;
-                    const other = a === uid ? b : a;
+                    const uidS = String(uid);
+                    const other = a === uidS ? b : a;
                     if (!byOther[other]) {
                         byOther[other] = {
                             otherUserId: isNaN(Number(other)) ? other : Number(other),
                             id: m.id,
-                            senderId: m.senderId,
-                            receiverId: m.receiverId,
+                            senderId: isNaN(Number(m.senderId)) ? m.senderId : Number(m.senderId),
+                            receiverId: isNaN(Number(m.receiverId)) ? m.receiverId : Number(m.receiverId),
                             content: m.content,
                             createdAt: m.createdAt,
                         };
                     }
                 }
                 return res.json(Object.values(byOther));
-            } catch (e) {
-                return res.status(500).json({ error: 'Erro interno' });
+            } catch (e2) {
+                console.warn('[DB] Consulta alternativa também falhou:', e2 && e2.message ? e2.message : e2);
+                dbAvailable = false;
+                try {
+                    const msgs = await readJsonFile('messages.json');
+                    const byOther = {};
+                    const uid2 = String(userId);
+                    const sorted = (msgs || []).slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+                    for (const m of sorted) {
+                        const a = String(m.senderId);
+                        const b = String(m.receiverId);
+                        if (a !== uid2 && b !== uid2) continue;
+                        const other = a === uid2 ? b : a;
+                        if (!byOther[other]) {
+                            byOther[other] = {
+                                otherUserId: isNaN(Number(other)) ? other : Number(other),
+                                id: m.id,
+                                senderId: m.senderId,
+                                receiverId: m.receiverId,
+                                content: m.content,
+                                createdAt: m.createdAt,
+                            };
+                        }
+                    }
+                    return res.json(Object.values(byOther));
+                } catch (e3) {
+                    return res.status(500).json({ error: 'Erro interno' });
+                }
             }
         }
         return res.status(500).json({ error: 'Erro interno do servidor' });
